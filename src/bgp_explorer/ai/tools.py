@@ -665,14 +665,27 @@ class BGPTools:
                 summary.append(f"**From {location}:**")
 
                 if probe_result.hops:
-                    for hop in probe_result.hops[:15]:  # Limit hops shown
-                        hop_num = hop.get("hop", "?")
-                        host = hop.get("host", "*")
-                        rtt = hop.get("rtt", None)
-                        if rtt:
-                            summary.append(f"  {hop_num}. {host} ({rtt:.2f}ms)")
+                    for i, hop in enumerate(probe_result.hops[:15], 1):  # Limit hops shown
+                        # Handle both old and new Globalping API response formats
+                        hop_num = hop.get("hop", i)
+
+                        # New format: resolvedHostname/resolvedAddress
+                        host = hop.get("resolvedHostname") or hop.get("resolvedAddress") or hop.get("host")
+
+                        # New format: timings array
+                        timings = hop.get("timings", [])
+                        if timings and isinstance(timings, list) and len(timings) > 0:
+                            rtt = timings[0].get("rtt")
                         else:
-                            summary.append(f"  {hop_num}. {host}")
+                            rtt = hop.get("rtt")
+
+                        if host:
+                            if rtt:
+                                summary.append(f"  {hop_num}. {host} ({rtt:.2f}ms)")
+                            else:
+                                summary.append(f"  {hop_num}. {host}")
+                        else:
+                            summary.append(f"  {hop_num}. *")
                     if len(probe_result.hops) > 15:
                         summary.append(f"  ... {len(probe_result.hops) - 15} more hops")
                 else:
