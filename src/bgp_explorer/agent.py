@@ -14,6 +14,7 @@ from bgp_explorer.config import AIBackendType, Settings
 from bgp_explorer.output import OutputFormatter
 from bgp_explorer.sources.bgp_radar import BgpRadarClient
 from bgp_explorer.sources.globalping import GlobalpingClient
+from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
 
 
@@ -43,6 +44,7 @@ class BGPExplorerAgent:
         self._ripe_stat: Optional[RipeStatClient] = None
         self._bgp_radar: Optional[BgpRadarClient] = None
         self._globalping: Optional[GlobalpingClient] = None
+        self._peeringdb: Optional[PeeringDBClient] = None
         self._tools: Optional[BGPTools] = None
         self._running = False
 
@@ -87,6 +89,15 @@ class BGPExplorerAgent:
             self._output.display_info(f"⚠ Globalping unavailable: {e}")
             self._globalping = None
 
+        # Initialize PeeringDB client (optional)
+        try:
+            self._peeringdb = PeeringDBClient()
+            await self._peeringdb.connect(force_refresh=self._settings.refresh_peeringdb)
+            self._output.display_info("✓ PeeringDB data loaded")
+        except Exception as e:
+            self._output.display_info(f"⚠ PeeringDB unavailable: {e}")
+            self._peeringdb = None
+
         # Initialize AI backend
         self._ai = self._create_ai_backend()
         self._output.display_info(f"✓ AI backend ready ({self._settings.ai_backend.value})")
@@ -96,6 +107,7 @@ class BGPExplorerAgent:
             ripe_stat=self._ripe_stat,
             bgp_radar=self._bgp_radar,
             globalping=self._globalping,
+            peeringdb=self._peeringdb,
         )
         for tool in self._tools.get_all_tools():
             self._ai.register_tool(tool)
@@ -183,6 +195,9 @@ class BGPExplorerAgent:
 
         if self._globalping:
             await self._globalping.disconnect()
+
+        if self._peeringdb:
+            await self._peeringdb.disconnect()
 
         if self._ripe_stat:
             await self._ripe_stat.disconnect()

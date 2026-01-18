@@ -65,6 +65,11 @@ AI-powered assistant for BGP routing investigation.
 - Ping 8.8.8.8 from multiple locations worldwide
 - Run a traceroute to cloudflare.com from Europe and Asia
 
+**IXP Information** (from PeeringDB)
+- What IXPs is AS15169 present at?
+- What networks peer at DE-CIX Frankfurt?
+- Tell me about AMS-IX
+
 **Historical Analysis** (requires BGPStream)
 - What happened to 1.2.3.0/24 on January 15th?
 - Show routing history for AS64496 last week

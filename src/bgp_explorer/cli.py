@@ -54,6 +54,11 @@ def cli():
     type=click.Path(),
     help="Path to save conversation output",
 )
+@click.option(
+    "--refresh-peeringdb",
+    is_flag=True,
+    help="Force refresh of PeeringDB data from CAIDA",
+)
 def chat(
     backend: str,
     api_key: Optional[str],
@@ -61,6 +66,7 @@ def chat(
     collectors: str,
     output_format: str,
     save_path: Optional[str],
+    refresh_peeringdb: bool,
 ):
     """Start an interactive chat session."""
     # Load environment variables from .env file
@@ -76,6 +82,7 @@ def chat(
         "collectors": collector_list,
         "output_format": OutputFormat(output_format),
         "save_path": save_path,
+        "refresh_peeringdb": refresh_peeringdb,
     }
 
     # Handle API key based on backend

@@ -77,6 +77,12 @@ class Settings(BaseSettings):
         description="Path to save output file",
     )
 
+    # PeeringDB Settings
+    refresh_peeringdb: bool = Field(
+        default=False,
+        description="Force refresh of PeeringDB data from CAIDA",
+    )
+
     # System Prompt
     system_prompt: str = Field(
         default="""You are an expert BGP network analyst assistant. Your role is to help network operators investigate routing incidents using live and historical BGP data.
@@ -100,6 +106,11 @@ You have access to these tools:
 **Global Network Testing (if Globalping is available):**
 - ping_from_global(target, locations) - Ping from worldwide vantage points
 - traceroute_from_global(target, locations) - Traceroute from multiple locations
+
+**IXP Information (from PeeringDB):**
+- get_ixps_for_asn(asn) - List all IXPs where a network is present
+- get_networks_at_ixp(ixp) - List networks peering at an IXP
+- get_ixp_details(ixp) - Get details about an IXP (location, participants)
 
 When answering questions:
 1. Use the appropriate tools to gather data
