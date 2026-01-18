@@ -183,3 +183,129 @@ class TestBGPTools:
         for func in tools.get_all_tools():
             assert func.__doc__ is not None
             assert len(func.__doc__) > 10
+
+
+class TestBGPToolsWithPeeringDB:
+    """Tests for BGPTools with PeeringDB integration."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        """Create a mock RIPE Stat client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def mock_peeringdb(self):
+        """Create a mock PeeringDB client."""
+        from bgp_explorer.models.ixp import IXP, IXPPresence, Network
+
+        mock = MagicMock()
+        mock._loaded = True
+
+        # Setup mock data
+        mock.get_ixps_for_asn.return_value = [
+            IXPPresence(asn=15169, ixp_id=31, ixp_name="AMS-IX", ipaddr4="80.249.208.1", speed=100000),
+            IXPPresence(asn=15169, ixp_id=26, ixp_name="DE-CIX Frankfurt", ipaddr4="80.81.192.1", speed=100000),
+        ]
+
+        mock.get_networks_at_ixp.return_value = [
+            Network(asn=15169, name="Google LLC", info_type="Content"),
+            Network(asn=13335, name="Cloudflare, Inc.", info_type="NSP"),
+        ]
+
+        mock.get_ixp_details.return_value = IXP(
+            id=31,
+            name="AMS-IX",
+            city="Amsterdam",
+            country="NL",
+            website="https://www.ams-ix.net/",
+            participant_count=900,
+        )
+
+        mock.get_network_info.return_value = Network(
+            asn=15169,
+            name="Google LLC",
+            info_type="Content",
+            website="https://www.google.com",
+        )
+
+        return mock
+
+    @pytest.fixture
+    def tools_with_peeringdb(self, mock_ripe_stat, mock_peeringdb):
+        """Create BGPTools instance with PeeringDB."""
+        return BGPTools(ripe_stat=mock_ripe_stat, peeringdb=mock_peeringdb)
+
+    @pytest.mark.asyncio
+    async def test_get_ixps_for_asn(self, tools_with_peeringdb, mock_peeringdb):
+        """Test getting IXPs for an ASN."""
+        result = await tools_with_peeringdb.get_ixps_for_asn(15169)
+
+        assert "AMS-IX" in result
+        assert "DE-CIX Frankfurt" in result
+        assert "15169" in result
+        mock_peeringdb.get_ixps_for_asn.assert_called_once_with(15169)
+
+    @pytest.mark.asyncio
+    async def test_get_ixps_for_asn_not_found(self, tools_with_peeringdb, mock_peeringdb):
+        """Test getting IXPs for an ASN with no presence."""
+        mock_peeringdb.get_ixps_for_asn.return_value = []
+
+        result = await tools_with_peeringdb.get_ixps_for_asn(99999)
+
+        assert "no ixp" in result.lower() or "not present" in result.lower() or "not found" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_get_networks_at_ixp(self, tools_with_peeringdb, mock_peeringdb):
+        """Test getting networks at an IXP."""
+        result = await tools_with_peeringdb.get_networks_at_ixp("AMS-IX")
+
+        assert "Google" in result
+        assert "Cloudflare" in result
+        mock_peeringdb.get_networks_at_ixp.assert_called_once_with("AMS-IX")
+
+    @pytest.mark.asyncio
+    async def test_get_networks_at_ixp_not_found(self, tools_with_peeringdb, mock_peeringdb):
+        """Test getting networks at an IXP that doesn't exist."""
+        mock_peeringdb.get_networks_at_ixp.return_value = []
+
+        result = await tools_with_peeringdb.get_networks_at_ixp("NonExistentIXP")
+
+        assert "no networks" in result.lower() or "not found" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_get_ixp_details(self, tools_with_peeringdb, mock_peeringdb):
+        """Test getting IXP details."""
+        result = await tools_with_peeringdb.get_ixp_details("AMS-IX")
+
+        assert "AMS-IX" in result
+        assert "Amsterdam" in result
+        assert "900" in result  # participant count
+        mock_peeringdb.get_ixp_details.assert_called_once_with("AMS-IX")
+
+    @pytest.mark.asyncio
+    async def test_get_ixp_details_not_found(self, tools_with_peeringdb, mock_peeringdb):
+        """Test getting details for non-existent IXP."""
+        mock_peeringdb.get_ixp_details.return_value = None
+
+        result = await tools_with_peeringdb.get_ixp_details("NonExistentIXP")
+
+        assert "not found" in result.lower()
+
+    def test_get_all_tools_includes_peeringdb(self, tools_with_peeringdb):
+        """Test that PeeringDB tools are included when available."""
+        tool_funcs = tools_with_peeringdb.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "get_ixps_for_asn" in tool_names
+        assert "get_networks_at_ixp" in tool_names
+        assert "get_ixp_details" in tool_names
+
+    def test_get_all_tools_excludes_peeringdb_when_none(self, mock_ripe_stat):
+        """Test that PeeringDB tools are excluded when not available."""
+        tools = BGPTools(ripe_stat=mock_ripe_stat, peeringdb=None)
+        tool_funcs = tools.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "get_ixps_for_asn" not in tool_names
+        assert "get_networks_at_ixp" not in tool_names
+        assert "get_ixp_details" not in tool_names

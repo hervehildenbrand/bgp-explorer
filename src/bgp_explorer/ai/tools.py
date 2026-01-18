@@ -13,6 +13,7 @@ from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.models.event import EventType
 from bgp_explorer.sources.bgp_radar import BgpRadarClient
 from bgp_explorer.sources.globalping import GlobalpingClient
+from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
 
 
@@ -29,6 +30,7 @@ class BGPTools:
         ripe_stat: RipeStatClient,
         bgp_radar: Optional[BgpRadarClient] = None,
         globalping: Optional[GlobalpingClient] = None,
+        peeringdb: Optional[PeeringDBClient] = None,
     ):
         """Initialize tools with data source clients.
 
@@ -36,10 +38,12 @@ class BGPTools:
             ripe_stat: RIPE Stat client for historical/state queries.
             bgp_radar: bgp-radar client for real-time anomalies.
             globalping: Globalping client for network probing.
+            peeringdb: PeeringDB client for IXP/network info.
         """
         self._ripe_stat = ripe_stat
         self._bgp_radar = bgp_radar
         self._globalping = globalping
+        self._peeringdb = peeringdb
         self._path_analyzer = PathAnalyzer()
         self._as_analyzer = ASAnalyzer()
 
@@ -64,6 +68,13 @@ class BGPTools:
             tools.extend([
                 self.ping_from_global,
                 self.traceroute_from_global,
+            ])
+        # Add PeeringDB tools if available
+        if self._peeringdb:
+            tools.extend([
+                self.get_ixps_for_asn,
+                self.get_networks_at_ixp,
+                self.get_ixp_details,
             ])
         return tools
 
@@ -673,3 +684,149 @@ class BGPTools:
 
         except Exception as e:
             return f"Error performing global traceroute to {target}: {str(e)}"
+
+    async def get_ixps_for_asn(self, asn: int) -> str:
+        """Get all Internet Exchange Points where an ASN is present.
+
+        Returns a list of IXPs where the specified network has a peering
+        presence, including their location and connection speed.
+
+        Args:
+            asn: Autonomous System Number (e.g., 15169 for Google).
+
+        Returns:
+            List of IXPs where the ASN is present with connection details.
+        """
+        if self._peeringdb is None:
+            return "PeeringDB is not configured. IXP information is not available."
+
+        try:
+            presences = self._peeringdb.get_ixps_for_asn(asn)
+
+            if not presences:
+                return f"AS{asn} is not present at any IXPs in PeeringDB, or the ASN does not exist."
+
+            summary = [
+                f"**AS{asn} IXP Presence**",
+                "",
+                f"**Total IXPs:** {len(presences)}",
+                "",
+            ]
+
+            for presence in presences:
+                speed_str = ""
+                if presence.speed:
+                    if presence.speed >= 100000:
+                        speed_str = f" ({presence.speed // 1000} Gbps)"
+                    else:
+                        speed_str = f" ({presence.speed} Mbps)"
+
+                summary.append(f"**{presence.ixp_name}**{speed_str}")
+                if presence.ipaddr4:
+                    summary.append(f"  - IPv4: {presence.ipaddr4}")
+                if presence.ipaddr6:
+                    summary.append(f"  - IPv6: {presence.ipaddr6}")
+                summary.append("")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting IXP presence for AS{asn}: {str(e)}"
+
+    async def get_networks_at_ixp(self, ixp: str) -> str:
+        """Get all networks/ASNs present at an Internet Exchange Point.
+
+        Returns a list of networks that have a peering presence at the
+        specified IXP.
+
+        Args:
+            ixp: IXP name (e.g., "AMS-IX", "DE-CIX Frankfurt") or ID.
+
+        Returns:
+            List of networks present at the IXP.
+        """
+        if self._peeringdb is None:
+            return "PeeringDB is not configured. IXP information is not available."
+
+        try:
+            # Try to parse as int for ID, otherwise use as name
+            try:
+                ixp_id_or_name = int(ixp)
+            except ValueError:
+                ixp_id_or_name = ixp
+
+            networks = self._peeringdb.get_networks_at_ixp(ixp_id_or_name)
+
+            if not networks:
+                return f"No networks found at IXP '{ixp}'. The IXP may not exist or have no participants."
+
+            # Get IXP details for the header
+            ixp_details = self._peeringdb.get_ixp_details(ixp_id_or_name)
+            ixp_name = ixp_details.name if ixp_details else ixp
+
+            summary = [
+                f"**Networks at {ixp_name}**",
+                "",
+                f"**Total participants:** {len(networks)}",
+                "",
+                "**Networks (sample):**",
+            ]
+
+            # Show first 20 networks
+            for network in networks[:20]:
+                type_str = f" ({network.info_type})" if network.info_type else ""
+                summary.append(f"  - AS{network.asn}: {network.name}{type_str}")
+
+            if len(networks) > 20:
+                summary.append(f"  ... and {len(networks) - 20} more networks")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting networks at IXP '{ixp}': {str(e)}"
+
+    async def get_ixp_details(self, ixp: str) -> str:
+        """Get detailed information about an Internet Exchange Point.
+
+        Returns comprehensive information about the IXP including location,
+        participant count, and website.
+
+        Args:
+            ixp: IXP name (e.g., "AMS-IX", "DE-CIX Frankfurt") or ID.
+
+        Returns:
+            Detailed IXP information.
+        """
+        if self._peeringdb is None:
+            return "PeeringDB is not configured. IXP information is not available."
+
+        try:
+            # Try to parse as int for ID, otherwise use as name
+            try:
+                ixp_id_or_name = int(ixp)
+            except ValueError:
+                ixp_id_or_name = ixp
+
+            ixp_info = self._peeringdb.get_ixp_details(ixp_id_or_name)
+
+            if not ixp_info:
+                return f"IXP '{ixp}' not found in PeeringDB."
+
+            summary = [
+                f"**{ixp_info.name}**",
+                "",
+                f"**Location:** {ixp_info.city}, {ixp_info.country}",
+            ]
+
+            if ixp_info.participant_count:
+                summary.append(f"**Participants:** {ixp_info.participant_count}")
+
+            if ixp_info.website:
+                summary.append(f"**Website:** {ixp_info.website}")
+
+            summary.append(f"**PeeringDB ID:** {ixp_info.id}")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting details for IXP '{ixp}': {str(e)}"
