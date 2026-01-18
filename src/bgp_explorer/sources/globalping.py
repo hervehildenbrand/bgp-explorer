@@ -334,7 +334,7 @@ class GlobalpingClient(DataSource):
         self,
         target: str,
         locations: Optional[list[dict[str, Any]]] = None,
-        protocol: str = "ICMP",
+        protocol: str = "UDP",
         port: Optional[int] = None,
         limit: int = 3,
     ) -> MeasurementResult:
@@ -343,7 +343,8 @@ class GlobalpingClient(DataSource):
         Args:
             target: Target IP or hostname.
             locations: List of probe locations.
-            protocol: Protocol to use (ICMP, TCP, UDP).
+            protocol: Protocol to use (UDP, ICMP, TCP). UDP is default as it
+                     works through more firewalls than ICMP.
             port: Port for TCP/UDP traceroute.
             limit: Number of probes per location (default: 3).
 
@@ -360,7 +361,7 @@ class GlobalpingClient(DataSource):
         target: str,
         locations: Optional[list[dict[str, Any]]] = None,
         packets: int = 3,
-        protocol: str = "ICMP",
+        protocol: str = "UDP",
         limit: int = 3,
     ) -> MeasurementResult:
         """Run MTR (My Traceroute) from global probes.
@@ -372,7 +373,7 @@ class GlobalpingClient(DataSource):
             target: Target IP or hostname.
             locations: List of probe locations.
             packets: Number of packets per hop.
-            protocol: Protocol to use.
+            protocol: Protocol to use (UDP, ICMP, TCP). UDP is default.
             limit: Number of probes per location (default: 3).
 
         Returns:
