@@ -1,0 +1,146 @@
+"""Configuration management using Pydantic settings."""
+
+import os
+from enum import Enum
+from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class AIBackendType(str, Enum):
+    """Supported AI backend types."""
+
+    GEMINI = "gemini"
+    CLAUDE = "claude"
+
+
+class OutputFormat(str, Enum):
+    """Output format options."""
+
+    TEXT = "text"
+    JSON = "json"
+    BOTH = "both"
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment and CLI.
+
+    Settings are loaded in priority order:
+    1. CLI arguments (highest priority)
+    2. Environment variables
+    3. .env file
+    4. Default values (lowest priority)
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # AI Backend Settings
+    ai_backend: AIBackendType = Field(
+        default=AIBackendType.GEMINI,
+        description="AI backend to use (gemini or claude)",
+    )
+    gemini_api_key: Optional[str] = Field(
+        default=None,
+        description="Google Gemini API key",
+    )
+    anthropic_api_key: Optional[str] = Field(
+        default=None,
+        description="Anthropic Claude API key",
+    )
+    gemini_model: str = Field(
+        default="gemini-1.5-flash",
+        description="Gemini model name",
+    )
+
+    # bgp-radar Settings
+    bgp_radar_path: Optional[str] = Field(
+        default=None,
+        description="Path to bgp-radar binary",
+    )
+    collectors: list[str] = Field(
+        default=["rrc00"],
+        description="RIS collectors to monitor",
+    )
+
+    # Output Settings
+    output_format: OutputFormat = Field(
+        default=OutputFormat.TEXT,
+        description="Output format (text, json, or both)",
+    )
+    save_path: Optional[str] = Field(
+        default=None,
+        description="Path to save output file",
+    )
+
+    # System Prompt
+    system_prompt: str = Field(
+        default="""You are an expert BGP network analyst assistant. Your role is to help network operators investigate routing incidents using live and historical BGP data.
+
+You have access to these tools:
+
+**Prefix & ASN Queries:**
+- lookup_prefix(prefix) - Get origin ASN, AS paths, and visibility for a prefix
+- get_asn_announcements(asn) - List all prefixes announced by an ASN
+- get_asn_details(asn) - Detailed ASN analysis with upstream/downstream relationships
+- get_routing_history(resource, start_date, end_date) - Historical routing data
+
+**Path Analysis:**
+- analyze_as_path(prefix) - Path diversity, upstream providers, transit ASNs, prepending detection
+- compare_collectors(prefix) - Compare routing views across collectors, detect inconsistencies
+
+**Security & Validation:**
+- get_rpki_status(prefix, origin_asn) - RPKI validation (valid/invalid/not-found)
+- get_anomalies(event_type, prefix, asn) - Real-time BGP anomalies from bgp-radar
+
+**Global Network Testing (if Globalping is available):**
+- ping_from_global(target, locations) - Ping from worldwide vantage points
+- traceroute_from_global(target, locations) - Traceroute from multiple locations
+
+When answering questions:
+1. Use the appropriate tools to gather data
+2. Analyze the results in the context of the user's question
+3. Provide clear, actionable insights
+4. Highlight any anomalies or security concerns (RPKI invalid, multiple origins, etc.)
+
+Be concise but thorough. Use technical terminology appropriate for network operators.""",
+        description="System prompt for AI assistant",
+    )
+
+    def get_api_key(self) -> str:
+        """Get the API key for the configured backend.
+
+        Returns:
+            API key string.
+
+        Raises:
+            ValueError: If no API key is configured for the backend.
+        """
+        if self.ai_backend == AIBackendType.GEMINI:
+            if not self.gemini_api_key:
+                raise ValueError(
+                    "GEMINI_API_KEY not set. Please set the environment variable or provide --api-key."
+                )
+            return self.gemini_api_key
+        else:
+            if not self.anthropic_api_key:
+                raise ValueError(
+                    "ANTHROPIC_API_KEY not set. Please set the environment variable or provide --api-key."
+                )
+            return self.anthropic_api_key
+
+
+def load_settings(**overrides) -> Settings:
+    """Load settings with optional overrides.
+
+    Args:
+        **overrides: Keyword arguments to override settings.
+
+    Returns:
+        Settings instance.
+    """
+    return Settings(**{k: v for k, v in overrides.items() if v is not None})

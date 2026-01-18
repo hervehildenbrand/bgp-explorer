@@ -1,0 +1,217 @@
+# BGP Explorer
+
+AI-powered CLI for querying live and historical internet routing data using natural language.
+
+## Features
+
+- **Natural Language Queries**: Ask questions about BGP routing in plain English
+- **Multiple Data Sources**:
+  - RIPE Stat API for historical and current BGP state
+  - bgp-radar for real-time anomaly detection (hijacks, leaks, blackholes)
+  - Globalping for worldwide network testing (ping, traceroute)
+  - BGPStream for historical BGP archives
+- **AI-Powered Analysis**: Gemini or Claude AI analyzes routing data and provides insights
+- **Path Analysis**: AS path diversity, upstream/downstream relationships, prepending detection
+- **RPKI Validation**: Check route origin validation status
+- **Anomaly Detection**: Real-time hijack, route leak, and blackhole detection
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/hervehildenbrand/bgp-explorer.git
+cd bgp-explorer
+
+# Install with uv
+uv sync
+
+# Or install with pip
+pip install -e .
+```
+
+### Optional Dependencies
+
+```bash
+# For BGPStream support (requires libBGPStream)
+brew install bgpstream  # macOS
+uv sync --extra bgpstream
+```
+
+## Prerequisites
+
+- **Python 3.11+**
+- **AI API Key** (one of):
+  - Gemini API Key from [Google AI Studio](https://aistudio.google.com/)
+  - Anthropic API Key from [Anthropic Console](https://console.anthropic.com/)
+- **bgp-radar** (optional): For real-time anomaly detection
+  ```bash
+  go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest
+  ```
+
+## Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+```bash
+# AI Backend (choose one)
+GEMINI_API_KEY=your_gemini_key_here
+ANTHROPIC_API_KEY=your_anthropic_key_here
+
+# Optional: bgp-radar path (defaults to PATH lookup)
+BGP_RADAR_PATH=/path/to/bgp-radar
+```
+
+## Usage
+
+### Start Interactive Chat
+
+```bash
+# With Gemini (default)
+uv run bgp-explorer chat
+
+# With Claude
+uv run bgp-explorer chat --backend claude
+```
+
+### CLI Options
+
+```bash
+uv run bgp-explorer chat [OPTIONS]
+
+Options:
+  --backend [gemini|claude]  AI backend to use (default: gemini)
+  --api-key TEXT             API key for the AI backend
+  --bgp-radar-path TEXT      Path to bgp-radar binary
+  --collectors TEXT          Comma-separated list of RIS collectors (default: rrc00)
+  --output [text|json|both]  Output format (default: text)
+  --save PATH                Path to save conversation output
+```
+
+## What You Can Do
+
+### Prefix & ASN Lookups
+```
+> Who originates 8.8.8.0/24?
+> What prefixes does AS15169 announce?
+> Give me details about AS13335
+```
+
+### Path Analysis
+```
+> Analyze the AS paths to 1.1.1.0/24
+> Compare how different collectors see 8.8.8.0/24
+> What are the upstream providers for AS64496?
+```
+
+### Security & Validation
+```
+> Check RPKI status for 1.1.1.0/24 from AS13335
+> Are there any BGP hijacks right now?
+> Show me recent route leaks
+```
+
+### Global Network Testing
+```
+> Ping 8.8.8.8 from multiple locations worldwide
+> Run a traceroute to cloudflare.com from Europe and Asia
+```
+
+### Historical Analysis
+```
+> Show routing history for 8.8.8.0/24 from 2024-01-01 to 2024-01-31
+> What happened to 1.2.3.0/24 last week?
+```
+
+## Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `lookup_prefix` | Get origin ASN, AS paths, and visibility for a prefix |
+| `get_asn_announcements` | List all prefixes announced by an ASN |
+| `get_asn_details` | Detailed ASN analysis with upstream/downstream relationships |
+| `get_routing_history` | Historical routing data for a resource |
+| `analyze_as_path` | Path diversity, upstream providers, transit ASNs, prepending detection |
+| `compare_collectors` | Compare routing views across collectors, detect inconsistencies |
+| `get_rpki_status` | RPKI validation (valid/invalid/not-found) |
+| `get_anomalies` | Real-time BGP anomalies from bgp-radar |
+| `ping_from_global` | Ping from worldwide vantage points (requires Globalping) |
+| `traceroute_from_global` | Traceroute from multiple locations (requires Globalping) |
+
+## Commands
+
+- `/export [path]` - Export conversation to JSON
+- `/clear` - Clear conversation history
+- `/help` - Show help message
+- `exit` - Exit the application
+
+## Architecture
+
+```
+User → CLI (cli.py) → Agent (agent.py) → AI Backend (gemini/claude)
+                                              ↓
+                                        Tools (ai/tools.py)
+                                              ↓
+                    ┌─────────────┬───────────┴───────────┬─────────────┐
+                    ↓             ↓                       ↓             ↓
+              bgp-radar      RIPE Stat              Globalping    BGPStream
+            [real-time]    [state/history]          [probing]    [archives]
+```
+
+## Data Sources
+
+| Source | Type | Data Provided |
+|--------|------|---------------|
+| **RIPE Stat** | REST API | Current BGP state, routing history, RPKI validation |
+| **bgp-radar** | Subprocess | Real-time anomaly detection (hijacks, leaks, blackholes) |
+| **Globalping** | REST API | Global ping, traceroute, MTR, DNS measurements |
+| **BGPStream** | Library | Historical BGP data from RouteViews and RIPE RIS |
+
+## Development
+
+```bash
+# Install with dev dependencies
+uv sync --dev
+
+# Run tests
+uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=bgp_explorer
+
+# Run specific test file
+uv run pytest tests/test_models/test_route.py -v
+```
+
+## Project Structure
+
+```
+src/bgp_explorer/
+├── cli.py           # Click CLI entrypoint
+├── agent.py         # AI agent orchestration
+├── config.py        # Pydantic settings
+├── output.py        # Output formatting
+├── models/          # Data models (BGPRoute, BGPEvent)
+├── cache/           # TTL cache implementation
+├── sources/         # Data source clients
+│   ├── ripe_stat.py   # RIPE Stat REST API
+│   ├── bgp_radar.py   # bgp-radar subprocess
+│   ├── globalping.py  # Globalping REST API
+│   └── bgpstream.py   # BGPStream wrapper
+├── analysis/        # Analysis utilities
+│   ├── path_analysis.py  # AS path analysis
+│   └── as_analysis.py    # ASN relationship analysis
+└── ai/              # AI backends
+    ├── base.py      # Abstract base class
+    ├── gemini.py    # Gemini implementation
+    ├── claude.py    # Claude implementation
+    └── tools.py     # Tool definitions
+```
+
+## License
+
+MIT

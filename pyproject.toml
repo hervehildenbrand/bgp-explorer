@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bgp-explorer"
+version = "0.1.0"
+description = "AI-powered CLI for querying live and historical internet routing data"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Herve Hildenbrand" }
+]
+keywords = ["bgp", "routing", "network", "ai", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking",
+]
+dependencies = [
+    "click>=8.1",
+    "aiohttp>=3.9",
+    "google-generativeai>=0.8",
+    "anthropic>=0.40",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
+    "aioresponses>=0.7",
+]
+bgpstream = [
+    "pybgpstream>=2.0",
+]
+
+[project.scripts]
+bgp-explorer = "bgp_explorer.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bgp_explorer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src/bgp_explorer"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
