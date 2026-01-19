@@ -122,12 +122,12 @@ class TestClaudeBackend:
     def test_model_name_default(self, mock_anthropic):
         """Test default model name."""
         backend = ClaudeBackend(api_key="test-key")
-        assert backend._model_name == "claude-sonnet-4-20250514"
+        assert backend._model_name == "claude-sonnet-4-5-20250929"
 
     def test_model_name_custom(self, mock_anthropic):
         """Test custom model name."""
-        backend = ClaudeBackend(api_key="test-key", model="claude-opus-4-20250514")
-        assert backend._model_name == "claude-opus-4-20250514"
+        backend = ClaudeBackend(api_key="test-key", model="claude-opus-4-5-20251124")
+        assert backend._model_name == "claude-opus-4-5-20251124"
 
     def test_max_iterations(self, mock_anthropic):
         """Test max iterations for tool loop."""

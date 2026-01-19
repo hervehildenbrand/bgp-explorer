@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class EventType(str, Enum):
@@ -39,7 +39,7 @@ class BGPEvent:
     severity: Severity
     affected_prefix: str
     detected_at: datetime
-    affected_asn: Optional[int] = None
+    affected_asn: int | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:

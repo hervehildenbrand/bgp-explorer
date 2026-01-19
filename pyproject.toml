@@ -27,9 +27,6 @@ classifiers = [
 dependencies = [
     "click>=8.1",
     "aiohttp>=3.9",
-    "google-generativeai>=0.8",
-    "google-auth-oauthlib>=1.0",
-    "google-api-python-client>=2.0",
     "anthropic>=0.40",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -37,12 +34,18 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/hervehildenbrand/bgp-explorer"
+Repository = "https://github.com/hervehildenbrand/bgp-explorer"
+Issues = "https://github.com/hervehildenbrand/bgp-explorer/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.0",
     "aioresponses>=0.7",
+    "ruff>=0.8",
 ]
 bgpstream = [
     "pybgpstream>=2.0",
@@ -70,3 +73,19 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+    "E501",  # Line length handled separately
+    "E402",  # Module level import not at top (needed for readline setup in cli.py)
+    "C401",  # Set comprehension style preference
+    "B904",  # Raise from exception chaining
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bgp_explorer"]

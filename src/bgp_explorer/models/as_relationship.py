@@ -5,7 +5,6 @@ actual AS-to-AS relationships (peer, upstream, downstream).
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -26,7 +25,7 @@ class ASRelationship:
 
     asn1: int
     asn2: int
-    asn2_name: Optional[str]
+    asn2_name: str | None
     connected_pct: float
     peer_pct: float
     as1_upstream_pct: float
@@ -109,7 +108,7 @@ class ASNeighbor:
     """
 
     asn: int
-    name: Optional[str]
+    name: str | None
     peers_count: int
     peers_percent: float
 

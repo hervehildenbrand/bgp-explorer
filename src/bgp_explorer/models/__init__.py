@@ -1,9 +1,9 @@
 """Data models for BGP Explorer."""
 
-from bgp_explorer.models.route import BGPRoute
+from bgp_explorer.models.as_relationship import ASConnectivity, ASNeighbor, ASRelationship
 from bgp_explorer.models.event import BGPEvent
-from bgp_explorer.models.ixp import IXP, Network, IXPPresence
-from bgp_explorer.models.as_relationship import ASRelationship, ASNeighbor, ASConnectivity
+from bgp_explorer.models.ixp import IXP, IXPPresence, Network
+from bgp_explorer.models.route import BGPRoute
 
 __all__ = [
     "BGPRoute",

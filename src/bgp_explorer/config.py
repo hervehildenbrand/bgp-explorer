@@ -1,18 +1,9 @@
 """Configuration management using Pydantic settings."""
 
-import os
 from enum import Enum
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class AIBackendType(str, Enum):
-    """Supported AI backend types."""
-
-    GEMINI = "gemini"
-    CLAUDE = "claude"
 
 
 class ClaudeModel(str, Enum):
@@ -29,9 +20,9 @@ class ClaudeModel(str, Enum):
     def model_id(self) -> str:
         """Get the actual model ID for the API."""
         model_ids = {
-            ClaudeModel.HAIKU: "claude-3-5-haiku-20241022",
-            ClaudeModel.SONNET: "claude-sonnet-4-20250514",
-            ClaudeModel.OPUS: "claude-opus-4-20250514",
+            ClaudeModel.HAIKU: "claude-haiku-4-5-20251215",
+            ClaudeModel.SONNET: "claude-sonnet-4-5-20250929",
+            ClaudeModel.OPUS: "claude-opus-4-5-20251124",
         }
         return model_ids[self]
 
@@ -60,38 +51,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # AI Backend Settings
-    ai_backend: AIBackendType = Field(
-        default=AIBackendType.GEMINI,
-        description="AI backend to use (gemini or claude)",
-    )
-    gemini_api_key: Optional[str] = Field(
-        default=None,
-        description="Google Gemini API key",
-    )
-    anthropic_api_key: Optional[str] = Field(
+    # AI Backend Settings (Claude only)
+    anthropic_api_key: str | None = Field(
         default=None,
         description="Anthropic Claude API key",
-    )
-    gemini_model: str = Field(
-        default="gemini-1.5-flash",
-        description="Gemini model name",
     )
     claude_model: ClaudeModel = Field(
         default=ClaudeModel.SONNET,
         description="Claude model tier (haiku, sonnet, opus)",
     )
-    use_oauth: bool = Field(
-        default=False,
-        description="Use OAuth authentication for Gemini (Google login)",
-    )
-    oauth_client_secret: Optional[str] = Field(
-        default=None,
-        description="Path to OAuth client_secret.json file",
-    )
 
     # bgp-radar Settings
-    bgp_radar_path: Optional[str] = Field(
+    bgp_radar_path: str | None = Field(
         default=None,
         description="Path to bgp-radar binary",
     )
@@ -105,7 +76,7 @@ class Settings(BaseSettings):
         default=OutputFormat.TEXT,
         description="Output format (text, json, or both)",
     )
-    save_path: Optional[str] = Field(
+    save_path: str | None = Field(
         default=None,
         description="Path to save output file",
     )
@@ -120,7 +91,21 @@ class Settings(BaseSettings):
     system_prompt: str = Field(
         default="""You are an expert BGP network analyst assistant. Your role is to help network operators investigate routing incidents using live and historical BGP data.
 
+**CRITICAL RULE - ALWAYS USE TOOLS:**
+You MUST use the provided tools to get real-time data. NEVER answer questions about ASNs, prefixes, routing, IXPs, or network relationships from your training knowledge.
+- WRONG: "Google's ASN is AS15169" (from memory)
+- RIGHT: Use search_asn("Google") or get_asn_details(15169) to verify
+- WRONG: "Cloudflare is present at DE-CIX" (from memory)
+- RIGHT: Use get_ixps_for_asn() to get current IXP presence
+
+Your training data may be outdated. BGP routing changes constantly. Always fetch live data.
+
 You have access to these tools:
+
+**IMPORTANT - ASN Search (use this FIRST when given a company name):**
+- search_asn(query) - Search for ASNs by company/organization name (e.g., "Kentik", "Google")
+  ALWAYS use this tool first when a user mentions a company name without an ASN number.
+  NEVER guess or make up ASN numbers.
 
 **Prefix & ASN Queries:**
 - lookup_prefix(prefix) - Get origin ASN, AS paths, and visibility for a prefix
@@ -134,7 +119,12 @@ You have access to these tools:
 
 **Security & Validation:**
 - get_rpki_status(prefix, origin_asn) - RPKI validation (valid/invalid/not-found)
-- get_anomalies(event_type, prefix, asn) - Real-time BGP anomalies from bgp-radar
+- get_anomalies(event_type, prefix, asn) - Query recent BGP anomalies from bgp-radar
+
+**Real-time Monitoring (opt-in):**
+- start_monitoring(collectors) - Start bgp-radar to watch for anomalies in real-time
+- stop_monitoring() - Stop real-time monitoring
+Note: Monitoring is opt-in. Use these tools when the user wants to watch for live events.
 
 **Global Network Testing (if Globalping is available):**
 - ping_from_global(target, locations) - Ping from worldwide vantage points
@@ -148,15 +138,27 @@ You have access to these tools:
 **AS Relationship Data (from Monocle - observed BGP data):**
 - get_as_peers(asn) - Get all networks that peer with an AS
 - get_as_upstreams(asn) - Get upstream transit providers for an AS
-- get_as_downstreams(asn) - Get downstream customers of an AS
+- get_as_downstreams(asn) - Get downstream customers of an AS (THIS determines if an AS provides transit!)
 - check_as_relationship(asn1, asn2) - Check the relationship between two ASes
 - get_as_connectivity_summary(asn) - Get counts of upstreams, peers, and downstreams
 
+**IMPORTANT - Transit Provider vs Transit Position:**
+When get_asn_details() shows "As mid-path transit: 0", this does NOT mean the AS doesn't provide transit.
+- "mid-path transit" counts appearances in paths TO the ASN's own prefixes (rarely applies to origin networks)
+- To determine if an AS provides transit to other networks, check "Downstream Customers" or use get_as_downstreams()
+- An AS with downstream customers IS a transit provider, regardless of the "mid-path transit" count
+
 When answering questions:
-1. Use the appropriate tools to gather data
-2. Analyze the results in the context of the user's question
-3. Provide clear, actionable insights
-4. Highlight any anomalies or security concerns (RPKI invalid, multiple origins, etc.)
+1. If the user mentions a company/organization name without an ASN, use search_asn() FIRST
+2. Use the appropriate tools to gather data
+3. Analyze the results in the context of the user's question
+4. Provide clear, actionable insights
+5. Highlight any anomalies or security concerns (RPKI invalid, multiple origins, etc.)
+
+**Handling Company Names vs ASN Numbers:**
+- User says "show me Kentik's peers" -> Use search_asn("Kentik") first, then get_as_peers()
+- User says "show me AS6169's peers" -> Use get_as_peers(6169) directly
+- If search_asn returns multiple results, ASK the user which one they meant
 
 **Handling Unclear Requests:**
 When the user's intent is unclear or you need more information, ASK clarifying questions before proceeding. Be conversational and helpful.
@@ -178,36 +180,26 @@ When asking questions:
 - Offer options when helpful (e.g., "Did you mean AS15169 (Google) or AS13335 (Cloudflare)?")
 - Explain briefly why you're asking if it's not obvious
 
-Be concise but thorough. Use technical terminology appropriate for network operators.""",
+Be concise but thorough. Use technical terminology appropriate for network operators.
+
+**REMINDER:** Every factual claim about networks, ASNs, prefixes, or routing MUST come from tool results, not your training data. If you don't have a tool for something, say so - don't guess.""",
         description="System prompt for AI assistant",
     )
 
-    def get_api_key(self) -> Optional[str]:
-        """Get the API key for the configured backend.
+    def get_api_key(self) -> str:
+        """Get the Anthropic API key.
 
         Returns:
-            API key string, or None if using OAuth.
+            API key string.
 
         Raises:
-            ValueError: If no API key is configured for the backend (and not using OAuth).
+            ValueError: If no API key is configured.
         """
-        if self.ai_backend == AIBackendType.GEMINI:
-            if self.use_oauth:
-                return None  # OAuth will be used instead
-            if not self.gemini_api_key:
-                raise ValueError(
-                    "GEMINI_API_KEY not set. Either:\n"
-                    "  - Set the environment variable\n"
-                    "  - Provide --api-key option\n"
-                    "  - Use --oauth flag for Google login"
-                )
-            return self.gemini_api_key
-        else:
-            if not self.anthropic_api_key:
-                raise ValueError(
-                    "ANTHROPIC_API_KEY not set. Please set the environment variable or provide --api-key."
-                )
-            return self.anthropic_api_key
+        if not self.anthropic_api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY not set. Please set the environment variable or provide --api-key."
+            )
+        return self.anthropic_api_key
 
 
 def load_settings(**overrides) -> Settings:

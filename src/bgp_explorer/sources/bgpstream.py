@@ -7,8 +7,7 @@ Requires: libBGPStream C library and pybgpstream Python bindings.
 Install: `brew install bgpstream` (macOS) or build from source.
 """
 
-from datetime import datetime, timezone
-from typing import AsyncIterator, Optional
+from datetime import UTC, datetime
 
 from bgp_explorer.models.route import BGPRoute
 from bgp_explorer.sources.base import DataSource
@@ -71,9 +70,9 @@ class BGPStreamClient(DataSource):
         self,
         start_time: datetime,
         end_time: datetime,
-        collectors: Optional[list[str]] = None,
-        prefix_filter: Optional[str] = None,
-        asn_filter: Optional[int] = None,
+        collectors: list[str] | None = None,
+        prefix_filter: str | None = None,
+        asn_filter: int | None = None,
         record_type: str = "updates",
     ) -> list[BGPRoute]:
         """Get historical BGP updates for a time range.
@@ -120,8 +119,8 @@ class BGPStreamClient(DataSource):
     def get_rib_snapshot(
         self,
         timestamp: datetime,
-        collectors: Optional[list[str]] = None,
-        prefix_filter: Optional[str] = None,
+        collectors: list[str] | None = None,
+        prefix_filter: str | None = None,
     ) -> list[BGPRoute]:
         """Get a RIB snapshot at a specific time.
 
@@ -135,10 +134,10 @@ class BGPStreamClient(DataSource):
         """
         # RIB dumps are typically every 2 hours, so we search in a window
         start = datetime.fromtimestamp(
-            timestamp.timestamp() - 7200, tz=timezone.utc
+            timestamp.timestamp() - 7200, tz=UTC
         )
         end = datetime.fromtimestamp(
-            timestamp.timestamp() + 7200, tz=timezone.utc
+            timestamp.timestamp() + 7200, tz=UTC
         )
 
         stream = pybgpstream.BGPStream(
@@ -171,9 +170,9 @@ class BGPStreamClient(DataSource):
 
     def stream_updates(
         self,
-        collectors: Optional[list[str]] = None,
-        prefix_filter: Optional[str] = None,
-        asn_filter: Optional[int] = None,
+        collectors: list[str] | None = None,
+        prefix_filter: str | None = None,
+        asn_filter: int | None = None,
     ):
         """Stream real-time BGP updates.
 
@@ -209,7 +208,7 @@ class BGPStreamClient(DataSource):
                 if route:
                     yield route
 
-    def _elem_to_route(self, elem, rec) -> Optional[BGPRoute]:
+    def _elem_to_route(self, elem, rec) -> BGPRoute | None:
         """Convert a BGPStream element to a BGPRoute.
 
         Args:
@@ -255,7 +254,7 @@ class BGPStreamClient(DataSource):
             peer_ip = elem.peer_address
 
             # Timestamp
-            timestamp = datetime.fromtimestamp(rec.time, tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(rec.time, tz=UTC)
 
             # Communities
             communities_str = elem.fields.get("communities", "")
@@ -284,7 +283,7 @@ class BGPStreamClient(DataSource):
         prefix: str,
         start_time: datetime,
         end_time: datetime,
-        collectors: Optional[list[str]] = None,
+        collectors: list[str] | None = None,
     ) -> list[dict]:
         """Get all BGP events for a prefix in a time range.
 
@@ -316,7 +315,7 @@ class BGPStreamClient(DataSource):
             for elem in rec:
                 event = {
                     "type": "announcement" if elem.type == "A" else "withdrawal",
-                    "timestamp": datetime.fromtimestamp(rec.time, tz=timezone.utc),
+                    "timestamp": datetime.fromtimestamp(rec.time, tz=UTC),
                     "collector": rec.collector,
                     "peer_asn": elem.peer_asn,
                     "peer_ip": elem.peer_address,

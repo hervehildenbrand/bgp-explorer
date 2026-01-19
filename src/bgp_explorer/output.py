@@ -1,10 +1,11 @@
 """Output formatting and display utilities."""
 
 import json
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Generator, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -12,6 +13,7 @@ from rich.panel import Panel
 from rich.status import Status
 
 from bgp_explorer.config import OutputFormat
+from bgp_explorer.models.event import BGPEvent, Severity
 
 
 class OutputFormatter:
@@ -26,7 +28,7 @@ class OutputFormatter:
     def __init__(
         self,
         format: OutputFormat = OutputFormat.TEXT,
-        save_path: Optional[str] = None,
+        save_path: str | None = None,
     ):
         """Initialize the formatter.
 
@@ -38,6 +40,7 @@ class OutputFormatter:
         self.save_path = save_path
         self.console = Console()
         self._conversation_log: list[dict[str, Any]] = []
+        self._monitoring_mode = False
 
     def display_welcome(self) -> None:
         """Display welcome message."""
@@ -63,6 +66,12 @@ AI-powered assistant for BGP routing investigation.
 - Are there any BGP hijacks right now?
 - Show me recent route leaks
 
+**Real-time Monitoring** (requires bgp-radar)
+- Start watching for BGP anomalies
+- `/monitor start` - Watch all events
+- `/monitor start hijack` - Watch only hijacks
+- `/monitor filter leak blackhole` - Change filter while running
+
 **Global Network Testing** (requires Globalping)
 - Ping 8.8.8.8 from multiple locations worldwide
 - Run a traceroute to cloudflare.com from Europe and Asia
@@ -83,12 +92,57 @@ AI-powered assistant for BGP routing investigation.
 - Show routing history for AS64496 last week
 
 ## Commands
+- `/monitor start [types]` - Start monitoring (types: hijack, leak, blackhole)
+- `/monitor stop` - Stop monitoring
+- `/monitor status` - Check status and current filter
+- `/monitor filter [types]` - Change filter while running
 - `/export [path]` - Export conversation to JSON
 - `/clear` - Clear conversation history
 - `/help` - Show this message
 - `exit` - Exit the application
+
+*Tip: Use Tab for command autocomplete*
 """
         self.console.print(Markdown(welcome))
+
+    def display_input_box(self, monitoring_status: str | None = None) -> None:
+        """Display input box with top and bottom lines, cursor positioned for input.
+
+        Args:
+            monitoring_status: Optional monitoring status string to display as badge.
+        """
+        width = self.console.size.width
+
+        # Build top line with optional monitoring badge
+        if monitoring_status:
+            badge = f"[bold red]● MONITORING[/bold red] [dim]({monitoring_status})[/dim]"
+            # Calculate visible length (without Rich markup)
+            visible_len = len(f"● MONITORING ({monitoring_status})")
+            padding = width - visible_len - 2  # 2 for spacing
+            if padding > 0:
+                top_line = f" {badge} [dim]{'─' * padding}[/dim]"
+            else:
+                top_line = f" {badge}"
+        else:
+            top_line = f"[dim]{'─' * width}[/dim]"
+
+        self.console.print(f"\n{top_line}")  # top line with optional badge
+        self.console.print("")                # empty line for input
+        self.console.print(f"[dim]{'─' * width}[/dim]")  # bottom line
+        # Move cursor up 2 lines to the empty input line
+        print("\033[2A", end="", flush=True)
+
+    def enable_monitoring_mode(self) -> None:
+        """Enable monitoring mode flag.
+
+        In monitoring mode, events are displayed by clearing and redrawing
+        the input area to maintain CLI integrity.
+        """
+        self._monitoring_mode = True
+
+    def disable_monitoring_mode(self) -> None:
+        """Disable monitoring mode."""
+        self._monitoring_mode = False
 
     def display_user_input(self, message: str) -> None:
         """Display user input.
@@ -99,7 +153,7 @@ AI-powered assistant for BGP routing investigation.
         self._conversation_log.append({
             "role": "user",
             "content": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
         if self.format in (OutputFormat.TEXT, OutputFormat.BOTH):
@@ -114,7 +168,7 @@ AI-powered assistant for BGP routing investigation.
         self._conversation_log.append({
             "role": "assistant",
             "content": response,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
         if self.format in (OutputFormat.TEXT, OutputFormat.BOTH):
@@ -149,6 +203,77 @@ AI-powered assistant for BGP routing investigation.
         """
         self.console.print(f"[dim]{info}[/dim]")
 
+    def display_bgp_event(self, event: BGPEvent, monitoring_status: str | None = None) -> None:
+        """Display a real-time BGP anomaly event.
+
+        Uses Rich Panel with severity-based styling.
+
+        Args:
+            event: BGPEvent from bgp-radar.
+            monitoring_status: Current monitoring filter status for redrawing input box.
+        """
+        # Severity-based styling
+        severity_styles = {
+            Severity.HIGH: ("red", "bold red"),
+            Severity.MEDIUM: ("yellow", "bold yellow"),
+            Severity.LOW: ("green", "bold green"),
+        }
+        border_style, title_style = severity_styles.get(
+            event.severity, ("white", "bold white")
+        )
+
+        # Event type emoji
+        type_emoji = {
+            "hijack": "🚨",
+            "leak": "⚠️",
+            "blackhole": "🕳️",
+        }.get(event.type.value, "📢")
+
+        # Build content
+        lines = [
+            f"[bold]{type_emoji} {event.type.value.upper()}[/bold]",
+            "",
+            f"[bold]Prefix:[/bold] {event.affected_prefix}",
+        ]
+
+        if event.affected_asn:
+            lines.append(f"[bold]ASN:[/bold] AS{event.affected_asn}")
+
+        lines.append(f"[bold]Time:[/bold] {event.detected_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+        # Add key details
+        if event.details:
+            lines.append("")
+            for key, value in list(event.details.items())[:5]:
+                # Format key nicely
+                display_key = key.replace("_", " ").title()
+                lines.append(f"[dim]{display_key}:[/dim] {value}")
+
+        content = "\n".join(lines)
+
+        # Clear current input line and move up to make room for event
+        # Move cursor to beginning of line and clear it
+        print("\r\033[K", end="", flush=True)
+
+        # Move up past the input box (3 lines: top border, input, bottom border)
+        # and clear those lines
+        print("\033[3A", end="", flush=True)  # Move up 3 lines
+        print("\033[J", end="", flush=True)   # Clear from cursor to end of screen
+
+        # Print the event panel
+        self.console.print(
+            Panel(
+                content,
+                title=f"[{title_style}]BGP Anomaly Detected[/{title_style}]",
+                border_style=border_style,
+                expand=False,
+            )
+        )
+
+        # Redraw the input box
+        self.display_input_box(monitoring_status)
+        print("> ", end="", flush=True)
+
     @contextmanager
     def thinking_status(
         self, message: str = "Thinking..."
@@ -177,7 +302,7 @@ AI-powered assistant for BGP routing investigation.
         """
         status.update(f"[bold cyan]{message}[/bold cyan]")
 
-    def export_conversation(self, path: Optional[str] = None) -> str:
+    def export_conversation(self, path: str | None = None) -> str:
         """Export conversation to JSON file.
 
         Args:
@@ -192,7 +317,7 @@ AI-powered assistant for BGP routing investigation.
             export_path = f"bgp_explorer_conversation_{timestamp}.json"
 
         export_data = {
-            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "exported_at": datetime.now(UTC).isoformat(),
             "messages": self._conversation_log,
         }
 

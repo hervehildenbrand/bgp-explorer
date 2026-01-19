@@ -2,12 +2,14 @@
 
 import json
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from bgp_explorer.config import OutputFormat
+from bgp_explorer.models.event import BGPEvent, EventType, Severity
 from bgp_explorer.output import OutputFormatter, format_routes_as_table
 
 
@@ -285,3 +287,100 @@ class TestFormatRoutesAsTable:
 
         assert "8.8.8.0/24" in result
         assert "N/A" in result  # For missing fields
+
+
+class TestMonitoringMode:
+    """Tests for monitoring mode flag."""
+
+    @patch("bgp_explorer.output.Console")
+    def test_enable_monitoring_mode(self, mock_console_class):
+        """Test enabling monitoring mode."""
+        mock_console = MagicMock()
+        mock_console_class.return_value = mock_console
+
+        formatter = OutputFormatter()
+        assert formatter._monitoring_mode is False
+
+        formatter.enable_monitoring_mode()
+        assert formatter._monitoring_mode is True
+
+    @patch("bgp_explorer.output.Console")
+    def test_disable_monitoring_mode(self, mock_console_class):
+        """Test disabling monitoring mode."""
+        mock_console = MagicMock()
+        mock_console_class.return_value = mock_console
+
+        formatter = OutputFormatter()
+        formatter._monitoring_mode = True
+
+        formatter.disable_monitoring_mode()
+        assert formatter._monitoring_mode is False
+
+
+class TestDisplayBgpEvent:
+    """Tests for display_bgp_event method."""
+
+    @patch("bgp_explorer.output.Console")
+    def test_display_hijack_event(self, mock_console_class):
+        """Test displaying a hijack event."""
+        mock_console = MagicMock()
+        mock_console_class.return_value = mock_console
+
+        formatter = OutputFormatter()
+        event = BGPEvent(
+            type=EventType.HIJACK,
+            severity=Severity.HIGH,
+            affected_prefix="8.8.8.0/24",
+            affected_asn=15169,
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            details={"expected_origin": 15169, "observed_origin": 64496},
+        )
+
+        formatter.display_bgp_event(event)
+
+        # Called multiple times: panel + input box redraw
+        assert mock_console.print.call_count >= 1
+        # First call should be the Panel
+        first_call_args = mock_console.print.call_args_list[0][0][0]
+        from rich.panel import Panel
+        assert isinstance(first_call_args, Panel)
+
+    @patch("bgp_explorer.output.Console")
+    def test_display_leak_event(self, mock_console_class):
+        """Test displaying a route leak event."""
+        mock_console = MagicMock()
+        mock_console_class.return_value = mock_console
+
+        formatter = OutputFormatter()
+        event = BGPEvent(
+            type=EventType.LEAK,
+            severity=Severity.MEDIUM,
+            affected_prefix="1.1.1.0/24",
+            affected_asn=13335,
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+        formatter.display_bgp_event(event)
+
+        # Called multiple times: panel + input box redraw
+        assert mock_console.print.call_count >= 1
+
+    @patch("bgp_explorer.output.Console")
+    def test_display_blackhole_event(self, mock_console_class):
+        """Test displaying a blackhole event."""
+        mock_console = MagicMock()
+        mock_console_class.return_value = mock_console
+
+        formatter = OutputFormatter()
+        event = BGPEvent(
+            type=EventType.BLACKHOLE,
+            severity=Severity.LOW,
+            affected_prefix="192.0.2.0/24",
+            affected_asn=64496,
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+        formatter.display_bgp_event(event)
+
+        # Called multiple times: panel + input box redraw
+        assert mock_console.print.call_count >= 1

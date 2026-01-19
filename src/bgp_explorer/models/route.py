@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -30,12 +29,12 @@ class BGPRoute:
     collector: str
     timestamp: datetime
     source: str
-    next_hop: Optional[str] = None
-    origin: Optional[str] = None
+    next_hop: str | None = None
+    origin: str | None = None
     communities: list[str] = field(default_factory=list)
-    peer_ip: Optional[str] = None
-    peer_asn: Optional[int] = None
-    rpki_status: Optional[str] = None
+    peer_ip: str | None = None
+    peer_asn: int | None = None
+    rpki_status: str | None = None
 
     @property
     def as_path_length(self) -> int:

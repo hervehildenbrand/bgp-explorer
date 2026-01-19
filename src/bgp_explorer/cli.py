@@ -2,14 +2,128 @@
 
 import asyncio
 import sys
-from typing import Optional
 
 import click
 from dotenv import load_dotenv
 
+# Enable readline for arrow key history navigation and tab completion
+try:
+    import readline
+except ImportError:
+    readline = None  # readline not available on some platforms
+
+
+class CommandCompleter:
+    """Tab completion for / commands."""
+
+    # Command tree: command -> subcommands -> options
+    COMMANDS = {
+        "monitor": {
+            "start": ["hijack", "leak", "blackhole"],
+            "stop": [],
+            "status": [],
+            "filter": ["hijack", "leak", "blackhole"],
+        },
+        "export": [],
+        "clear": [],
+        "help": [],
+    }
+
+    def __init__(self):
+        self.matches: list[str] = []
+
+    def complete(self, text: str, state: int) -> str | None:
+        """Readline completion function.
+
+        Args:
+            text: Current word being typed.
+            state: Index of completion to return.
+
+        Returns:
+            Completion string or None.
+        """
+        if state == 0:
+            # Get the full line buffer
+            line = readline.get_line_buffer() if readline else ""
+            self.matches = self._get_completions(line, text)
+
+        return self.matches[state] if state < len(self.matches) else None
+
+    def _get_completions(self, line: str, text: str) -> list[str]:
+        """Get list of completions for current input.
+
+        Args:
+            line: Full line buffer.
+            text: Current word being typed.
+
+        Returns:
+            List of matching completions.
+        """
+        # Only complete if line starts with /
+        if not line.startswith("/"):
+            return []
+
+        # Remove leading /
+        line_without_slash = line[1:].lstrip()
+        parts = line_without_slash.split()
+
+        # Completing the command itself (e.g., "/mon<tab>")
+        if len(parts) == 0 or (len(parts) == 1 and not line_without_slash.endswith(" ")):
+            prefix = text.lstrip("/")
+            return [f"/{cmd} " for cmd in self.COMMANDS if cmd.startswith(prefix)]
+
+        command = parts[0]
+        if command not in self.COMMANDS:
+            return []
+
+        subcommands = self.COMMANDS[command]
+
+        # Command has no subcommands
+        if isinstance(subcommands, list):
+            return []
+
+        # Completing subcommand (e.g., "/monitor st<tab>")
+        if len(parts) == 1 or (len(parts) == 2 and not line_without_slash.endswith(" ")):
+            prefix = parts[1] if len(parts) > 1 else ""
+            return [f"{sub} " for sub in subcommands if sub.startswith(prefix)]
+
+        # Completing options for subcommand (e.g., "/monitor start hi<tab>")
+        subcommand = parts[1]
+        if subcommand not in subcommands:
+            return []
+
+        options = subcommands[subcommand]
+        if not options:
+            return []
+
+        # Get already-used options to avoid duplicates
+        used_options = set(parts[2:])
+        prefix = text if text else ""
+
+        return [f"{opt} " for opt in options if opt.startswith(prefix) and opt not in used_options]
+
+
+def setup_readline_completion():
+    """Configure readline for tab completion."""
+    if readline is None:
+        return
+
+    completer = CommandCompleter()
+    readline.set_completer(completer.complete)
+
+    # Use tab for completion
+    # macOS uses libedit which needs different binding
+    if "libedit" in readline.__doc__:
+        readline.parse_and_bind("bind ^I rl_complete")
+    else:
+        readline.parse_and_bind("tab: complete")
+
+    # Don't complete on empty input
+    readline.set_completer_delims(" \t\n")
+
 from bgp_explorer.agent import BGPExplorerAgent
 from bgp_explorer.ai.base import ChatEvent
-from bgp_explorer.config import AIBackendType, ClaudeModel, OutputFormat, load_settings
+from bgp_explorer.config import ClaudeModel, OutputFormat, load_settings
 from bgp_explorer.output import OutputFormatter
 
 
@@ -22,21 +136,15 @@ def cli():
 
 @cli.command()
 @click.option(
-    "--backend",
-    type=click.Choice(["gemini", "claude"]),
-    default="gemini",
-    help="AI backend to use",
-)
-@click.option(
     "--model",
     type=click.Choice(["haiku", "sonnet", "opus"]),
     default="sonnet",
-    help="Claude model tier (default: sonnet). Only used when --backend=claude",
+    help="Claude model tier (default: sonnet)",
 )
 @click.option(
     "--api-key",
-    envvar=["GEMINI_API_KEY", "ANTHROPIC_API_KEY"],
-    help="API key for the AI backend",
+    envvar="ANTHROPIC_API_KEY",
+    help="Anthropic API key",
 )
 @click.option(
     "--bgp-radar-path",
@@ -66,27 +174,14 @@ def cli():
     is_flag=True,
     help="Force refresh of PeeringDB data from CAIDA",
 )
-@click.option(
-    "--oauth",
-    is_flag=True,
-    help="Use OAuth authentication for Gemini (Google login instead of API key)",
-)
-@click.option(
-    "--client-secret",
-    type=click.Path(exists=True),
-    help="Path to OAuth client_secret.json (default: ./client_secret.json or ~/.config/bgp-explorer/client_secret.json)",
-)
 def chat(
-    backend: str,
     model: str,
-    api_key: Optional[str],
-    bgp_radar_path: Optional[str],
+    api_key: str | None,
+    bgp_radar_path: str | None,
     collectors: str,
     output_format: str,
-    save_path: Optional[str],
+    save_path: str | None,
     refresh_peeringdb: bool,
-    oauth: bool,
-    client_secret: Optional[str],
 ):
     """Start an interactive chat session."""
     # Load environment variables from .env file
@@ -97,31 +192,14 @@ def chat(
 
     # Build settings
     settings_kwargs = {
-        "ai_backend": AIBackendType(backend),
+        "claude_model": ClaudeModel(model),
+        "anthropic_api_key": api_key,
         "bgp_radar_path": bgp_radar_path,
         "collectors": collector_list,
         "output_format": OutputFormat(output_format),
         "save_path": save_path,
         "refresh_peeringdb": refresh_peeringdb,
-        "use_oauth": oauth,
-        "oauth_client_secret": client_secret,
     }
-
-    # Handle Claude model (only relevant for Claude backend)
-    if backend == "claude":
-        settings_kwargs["claude_model"] = ClaudeModel(model)
-
-    # Handle API key based on backend
-    if api_key:
-        if backend == "gemini":
-            settings_kwargs["gemini_api_key"] = api_key
-        else:
-            settings_kwargs["anthropic_api_key"] = api_key
-
-    # Validate OAuth is only used with Gemini
-    if oauth and backend != "gemini":
-        click.echo("Error: --oauth flag is only supported with --backend=gemini", err=True)
-        sys.exit(1)
 
     try:
         settings = load_settings(**settings_kwargs)
@@ -152,6 +230,9 @@ async def run_chat(settings, output: OutputFormatter) -> None:
         settings: Application settings.
         output: Output formatter.
     """
+    # Enable tab completion for / commands
+    setup_readline_completion()
+
     agent = BGPExplorerAgent(settings, output)
 
     try:
@@ -160,9 +241,11 @@ async def run_chat(settings, output: OutputFormatter) -> None:
 
         while True:
             try:
-                # Get user input
+                # Get user input with decorative box (show monitoring badge if active)
+                monitoring_status = agent.get_monitoring_status()
+                output.display_input_box(monitoring_status)
                 user_input = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: input("\n> ")
+                    None, lambda: input("> ")
                 )
                 user_input = user_input.strip()
 

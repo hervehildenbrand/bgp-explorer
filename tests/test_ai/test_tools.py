@@ -309,3 +309,110 @@ class TestBGPToolsWithPeeringDB:
         assert "get_ixps_for_asn" not in tool_names
         assert "get_networks_at_ixp" not in tool_names
         assert "get_ixp_details" not in tool_names
+
+
+class TestBGPToolsMonitoring:
+    """Tests for monitoring control tools."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        """Create a mock RIPE Stat client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def mock_bgp_radar(self):
+        """Create a mock bgp-radar client."""
+        mock = AsyncMock()
+        mock.is_running = False
+        mock._collectors = ["rrc00"]
+        return mock
+
+    @pytest.fixture
+    def tools(self, mock_ripe_stat, mock_bgp_radar):
+        """Create BGPTools instance with mocked clients."""
+        return BGPTools(ripe_stat=mock_ripe_stat, bgp_radar=mock_bgp_radar)
+
+    @pytest.mark.asyncio
+    async def test_start_monitoring_success(self, tools, mock_bgp_radar):
+        """Test starting monitoring successfully."""
+        mock_bgp_radar.is_running = False
+        mock_bgp_radar.start = AsyncMock()
+
+        result = await tools.start_monitoring()
+
+        mock_bgp_radar.start.assert_called_once()
+        assert "started" in result.lower() or "monitoring" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_start_monitoring_already_running(self, tools, mock_bgp_radar):
+        """Test starting monitoring when already running."""
+        mock_bgp_radar.is_running = True
+
+        result = await tools.start_monitoring()
+
+        assert "already" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_start_monitoring_with_collectors(self, tools, mock_bgp_radar):
+        """Test starting monitoring with custom collectors."""
+        mock_bgp_radar.is_running = False
+        mock_bgp_radar.start = AsyncMock()
+
+        result = await tools.start_monitoring(collectors=["rrc00", "rrc01"])
+
+        mock_bgp_radar.start.assert_called_once_with(collectors=["rrc00", "rrc01"])
+
+    @pytest.mark.asyncio
+    async def test_start_monitoring_no_radar(self, mock_ripe_stat):
+        """Test starting monitoring when bgp-radar not available."""
+        tools = BGPTools(ripe_stat=mock_ripe_stat, bgp_radar=None)
+
+        result = await tools.start_monitoring()
+
+        assert "not available" in result.lower() or "not configured" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_stop_monitoring_success(self, tools, mock_bgp_radar):
+        """Test stopping monitoring successfully."""
+        mock_bgp_radar.is_running = True
+        mock_bgp_radar.stop = AsyncMock()
+
+        result = await tools.stop_monitoring()
+
+        mock_bgp_radar.stop.assert_called_once()
+        assert "stopped" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_stop_monitoring_not_running(self, tools, mock_bgp_radar):
+        """Test stopping monitoring when not running."""
+        mock_bgp_radar.is_running = False
+
+        result = await tools.stop_monitoring()
+
+        assert "not running" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_stop_monitoring_no_radar(self, mock_ripe_stat):
+        """Test stopping monitoring when bgp-radar not available."""
+        tools = BGPTools(ripe_stat=mock_ripe_stat, bgp_radar=None)
+
+        result = await tools.stop_monitoring()
+
+        assert "not available" in result.lower() or "not configured" in result.lower()
+
+    def test_monitoring_tools_included(self, tools):
+        """Test that monitoring tools are included when bgp-radar is available."""
+        tool_funcs = tools.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "start_monitoring" in tool_names
+        assert "stop_monitoring" in tool_names
+
+    def test_monitoring_tools_excluded_when_no_radar(self, mock_ripe_stat):
+        """Test that monitoring tools are excluded when bgp-radar not available."""
+        tools = BGPTools(ripe_stat=mock_ripe_stat, bgp_radar=None)
+        tool_funcs = tools.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "start_monitoring" not in tool_names
+        assert "stop_monitoring" not in tool_names

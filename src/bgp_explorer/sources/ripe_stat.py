@@ -1,7 +1,7 @@
 """RIPE Stat REST API client."""
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import aiohttp
 
@@ -31,7 +31,7 @@ class RipeStatClient(DataSource):
         Args:
             cache_ttl: TTL for cached responses.
         """
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._cache = TTLCache(default_ttl=cache_ttl)
 
     async def connect(self) -> None:
@@ -101,14 +101,14 @@ class RipeStatClient(DataSource):
         data = await self._request("bgp-state", {"resource": prefix})
 
         routes = []
-        query_time = data.get("query_time", datetime.now(timezone.utc).isoformat())
+        query_time = data.get("query_time", datetime.now(UTC).isoformat())
         if isinstance(query_time, str):
             try:
                 timestamp = datetime.fromisoformat(query_time.replace("Z", "+00:00"))
             except ValueError:
-                timestamp = datetime.now(timezone.utc)
+                timestamp = datetime.now(UTC)
         else:
-            timestamp = datetime.now(timezone.utc)
+            timestamp = datetime.now(UTC)
 
         for entry in data.get("bgp_state", []):
             as_path = entry.get("path", [])
@@ -216,4 +216,48 @@ class RipeStatClient(DataSource):
             "endtime": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
         data = await self._request("bgplay", params)
+        return data
+
+    async def search_asn(self, query: str) -> list[dict[str, Any]]:
+        """Search for ASNs by organization/company name.
+
+        Uses the searchcomplete endpoint to find ASNs matching a query.
+
+        Args:
+            query: Organization name or partial name to search for.
+
+        Returns:
+            List of matching ASNs with their descriptions.
+        """
+        data = await self._request("searchcomplete", {"resource": query})
+
+        results = []
+        for category in data.get("categories", []):
+            if category.get("category") == "ASNs":
+                for suggestion in category.get("suggestions", []):
+                    # Parse the suggestion which is typically "ASxxxx - Description"
+                    value = suggestion.get("value", "")
+                    label = suggestion.get("label", "")
+                    if value.startswith("AS"):
+                        try:
+                            asn = int(value[2:])
+                            results.append({
+                                "asn": asn,
+                                "description": label,
+                            })
+                        except ValueError:
+                            continue
+
+        return results
+
+    async def get_as_overview(self, asn: int) -> dict[str, Any]:
+        """Get overview information for an ASN.
+
+        Args:
+            asn: Autonomous System Number.
+
+        Returns:
+            Dictionary with ASN overview including holder name.
+        """
+        data = await self._request("as-overview", {"resource": f"AS{asn}"})
         return data

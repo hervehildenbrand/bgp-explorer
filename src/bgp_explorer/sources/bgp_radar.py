@@ -4,11 +4,14 @@ import asyncio
 import json
 import os
 import shutil
+from collections.abc import AsyncIterator, Callable
 from datetime import timedelta
-from typing import AsyncIterator, Optional
+
+# Type for event callback function
+EventCallback = Callable[["BGPEvent"], None]
 
 from bgp_explorer.cache.ttl_cache import TTLCache
-from bgp_explorer.models.event import BGPEvent, EventType, Severity
+from bgp_explorer.models.event import BGPEvent, EventType
 from bgp_explorer.sources.base import DataSource
 
 
@@ -30,8 +33,8 @@ class BgpRadarClient(DataSource):
 
     def __init__(
         self,
-        binary_path: Optional[str] = None,
-        collectors: Optional[list[str]] = None,
+        binary_path: str | None = None,
+        collectors: list[str] | None = None,
         max_retries: int = 3,
         retry_delay: float = 1.0,
         cache_ttl: timedelta = timedelta(minutes=5),
@@ -54,16 +57,39 @@ class BgpRadarClient(DataSource):
         self._retry_delay = retry_delay
         self._max_recent_events = max_recent_events
 
-        self._process: Optional[asyncio.subprocess.Process] = None
+        self._process: asyncio.subprocess.Process | None = None
         self._event_cache = TTLCache(default_ttl=cache_ttl)
         self._recent_events: list[BGPEvent] = []
-        self._reader_task: Optional[asyncio.Task] = None
+        self._reader_task: asyncio.Task | None = None
         self._running = False
+        self._event_callback: EventCallback | None = None
+        self._event_filter: set[EventType] = set()  # Empty = all events
 
     @property
     def is_running(self) -> bool:
         """Check if bgp-radar process is running."""
         return self._running and self._process is not None
+
+    def set_event_callback(self, callback: EventCallback | None) -> None:
+        """Set a callback to be invoked when new events are received.
+
+        Args:
+            callback: Function to call with each BGPEvent, or None to clear.
+        """
+        self._event_callback = callback
+
+    def set_event_filter(self, event_types: set[EventType]) -> None:
+        """Set filter for which event types trigger the callback.
+
+        Args:
+            event_types: Set of EventTypes to pass through. Empty set = all events.
+        """
+        self._event_filter = event_types
+
+    @property
+    def event_filter(self) -> set[EventType]:
+        """Get current event filter."""
+        return self._event_filter
 
     async def connect(self) -> None:
         """Start the bgp-radar subprocess."""
@@ -88,7 +114,7 @@ class BgpRadarClient(DataSource):
         # Check in PATH
         return shutil.which(self._binary_path) is not None
 
-    async def start(self, collectors: Optional[list[str]] = None) -> None:
+    async def start(self, collectors: list[str] | None = None) -> None:
         """Start the bgp-radar subprocess.
 
         Args:
@@ -154,7 +180,7 @@ class BgpRadarClient(DataSource):
                 # Wait for graceful shutdown
                 try:
                     await asyncio.wait_for(self._process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     self._process.kill()
                     await self._process.wait()
             except ProcessLookupError:
@@ -162,12 +188,15 @@ class BgpRadarClient(DataSource):
             self._process = None
 
     async def _read_events(self) -> None:
-        """Background task to read events from stdout."""
-        if not self._process or not self._process.stdout:
+        """Background task to read events from stderr.
+
+        Note: bgp-radar uses Go's log package which writes to stderr by default.
+        """
+        if not self._process or not self._process.stderr:
             return
 
         try:
-            async for line in self._process.stdout:
+            async for line in self._process.stderr:
                 if not self._running:
                     break
 
@@ -184,19 +213,33 @@ class BgpRadarClient(DataSource):
         except Exception:
             pass  # Log in production
 
-    def _parse_event(self, json_line: str) -> Optional[BGPEvent]:
-        """Parse a JSON line into a BGPEvent.
+    def _parse_event(self, log_line: str) -> BGPEvent | None:
+        """Parse a log line into a BGPEvent.
+
+        bgp-radar outputs events with an "EVENT: " prefix followed by JSON:
+        EVENT: {"type":"hijack","severity":"high",...}
+
+        Other log lines (STATS:, info messages) are ignored.
 
         Args:
-            json_line: JSON string from bgp-radar stdout.
+            log_line: Log line from bgp-radar stderr.
 
         Returns:
             BGPEvent if valid event, None otherwise.
         """
-        try:
-            data = json.loads(json_line)
+        # bgp-radar prefixes event JSON with "EVENT: "
+        event_prefix = "EVENT: "
+        if event_prefix not in log_line:
+            return None
 
-            # Check if this is an event (has type field with known event type)
+        # Extract JSON after the prefix
+        json_start = log_line.find(event_prefix) + len(event_prefix)
+        json_str = log_line[json_start:].strip()
+
+        try:
+            data = json.loads(json_str)
+
+            # Validate event type
             event_type = data.get("type")
             if event_type not in ("hijack", "leak", "blackhole"):
                 return None
@@ -223,11 +266,17 @@ class BgpRadarClient(DataSource):
         cache_key = f"{event.type.value}:{event.affected_prefix}:{event.detected_at.isoformat()}"
         await self._event_cache.set(cache_key, event)
 
+        # Invoke callback if set and event passes filter
+        if self._event_callback:
+            # Empty filter = all events pass; otherwise check if type is in filter
+            if not self._event_filter or event.type in self._event_filter:
+                self._event_callback(event)
+
     async def get_recent_anomalies(
         self,
-        event_type: Optional[EventType] = None,
-        prefix: Optional[str] = None,
-        asn: Optional[int] = None,
+        event_type: EventType | None = None,
+        prefix: str | None = None,
+        asn: int | None = None,
     ) -> list[BGPEvent]:
         """Get recent anomaly events with optional filtering.
 

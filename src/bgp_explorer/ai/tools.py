@@ -4,9 +4,9 @@ These tools are registered with the AI backend and can be called
 by the AI to query BGP data sources.
 """
 
-import json
-from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
@@ -17,9 +17,9 @@ from bgp_explorer.sources.monocle import MonocleClient
 from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
 
-
 # Human-readable status messages for tool execution
 TOOL_DESCRIPTIONS: dict[str, str] = {
+    "search_asn": "Searching for ASNs matching '{query}'...",
     "lookup_prefix": "Looking up prefix {prefix}...",
     "get_asn_announcements": "Getting announcements for AS{asn}...",
     "get_routing_history": "Fetching routing history for {resource}...",
@@ -38,6 +38,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "get_as_downstreams": "Finding downstreams for AS{asn}...",
     "check_as_relationship": "Checking relationship between AS{asn1} and AS{asn2}...",
     "get_as_connectivity_summary": "Getting connectivity summary for AS{asn}...",
+    "start_monitoring": "Starting BGP anomaly monitoring...",
+    "stop_monitoring": "Stopping BGP anomaly monitoring...",
 }
 
 
@@ -72,10 +74,10 @@ class BGPTools:
     def __init__(
         self,
         ripe_stat: RipeStatClient,
-        bgp_radar: Optional[BgpRadarClient] = None,
-        globalping: Optional[GlobalpingClient] = None,
-        peeringdb: Optional[PeeringDBClient] = None,
-        monocle: Optional[MonocleClient] = None,
+        bgp_radar: BgpRadarClient | None = None,
+        globalping: GlobalpingClient | None = None,
+        peeringdb: PeeringDBClient | None = None,
+        monocle: MonocleClient | None = None,
     ):
         """Initialize tools with data source clients.
 
@@ -101,6 +103,7 @@ class BGPTools:
             List of tool functions.
         """
         tools = [
+            self.search_asn,
             self.lookup_prefix,
             self.get_asn_announcements,
             self.get_routing_history,
@@ -110,6 +113,12 @@ class BGPTools:
             self.compare_collectors,
             self.get_asn_details,
         ]
+        # Add bgp-radar monitoring tools if available
+        if self._bgp_radar:
+            tools.extend([
+                self.start_monitoring,
+                self.stop_monitoring,
+            ])
         # Add Globalping tools if available
         if self._globalping:
             tools.extend([
@@ -133,6 +142,54 @@ class BGPTools:
                 self.get_as_connectivity_summary,
             ])
         return tools
+
+    async def search_asn(self, query: str) -> str:
+        """Search for ASNs by organization or company name.
+
+        IMPORTANT: Use this tool FIRST when a user asks about a network by name
+        (e.g., "Kentik", "Google", "Cloudflare") without providing an ASN number.
+        This helps find the correct ASN before using other tools.
+
+        Args:
+            query: Organization name or partial name to search for (e.g., "Kentik", "Google").
+
+        Returns:
+            List of matching ASNs with their descriptions. If multiple matches,
+            ask the user to confirm which ASN they meant.
+        """
+        try:
+            results = await self._ripe_stat.search_asn(query)
+
+            if not results:
+                return (
+                    f"No ASNs found matching '{query}'. "
+                    "Please ask the user for the ASN number, or try a different search term."
+                )
+
+            summary = [
+                f"**ASN Search Results for '{query}':**",
+                "",
+                f"**Found {len(results)} matching ASN(s):**",
+                "",
+            ]
+
+            for result in results[:10]:
+                summary.append(f"  - **AS{result['asn']}**: {result['description']}")
+
+            if len(results) > 10:
+                summary.append(f"  ... and {len(results) - 10} more")
+
+            if len(results) > 1:
+                summary.append("")
+                summary.append(
+                    "**Multiple matches found.** Please confirm with the user which ASN they meant "
+                    "before proceeding with other queries."
+                )
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error searching for ASN: {str(e)}"
 
     async def lookup_prefix(self, prefix: str) -> str:
         """Look up BGP routing information for an IP prefix.
@@ -159,7 +216,7 @@ class BGPTools:
 
             summary = [
                 f"**Prefix: {prefix}**",
-                f"",
+                "",
                 f"**Origin ASN(s):** {', '.join(f'AS{asn}' for asn in sorted(origin_asns))}",
                 f"**Visible from:** {len(collectors)} collectors ({', '.join(sorted(collectors)[:5])}{'...' if len(collectors) > 5 else ''})",
                 f"**Unique AS paths:** {len(unique_paths)}",
@@ -249,8 +306,8 @@ class BGPTools:
         """
         try:
             # Parse dates
-            start = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
-            end = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc)
+            start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
+            end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
 
             history = await self._ripe_stat.get_routing_history(resource, start, end)
 
@@ -284,9 +341,9 @@ class BGPTools:
 
     async def get_anomalies(
         self,
-        event_type: Optional[str] = None,
-        prefix: Optional[str] = None,
-        asn: Optional[int] = None,
+        event_type: str | None = None,
+        prefix: str | None = None,
+        asn: int | None = None,
     ) -> str:
         """Get recent BGP anomalies detected by bgp-radar.
 
@@ -328,7 +385,7 @@ class BGPTools:
                 return f"No recent anomalies detected{filter_str}."
 
             summary = [
-                f"**Recent BGP Anomalies**",
+                "**Recent BGP Anomalies**",
                 f"**Count:** {len(events)}",
                 "",
             ]
@@ -382,8 +439,8 @@ class BGPTools:
             }.get(status, "❓")
 
             summary = [
-                f"**RPKI Validation**",
-                f"",
+                "**RPKI Validation**",
+                "",
                 f"**Prefix:** {prefix}",
                 f"**Origin:** AS{origin_asn}",
                 f"**Status:** {status_emoji} {status.upper()}",
@@ -588,18 +645,16 @@ class BGPTools:
                 summary.append(f"  {downstream_list}")
                 summary.append("")
 
-            summary.append("**Routing Behavior (from sampled routes):**")
+            summary.append("**Routing Behavior (from sampled routes to this ASN's prefixes):**")
             summary.append(f"  - Appearances in paths: {asn_summary['appearances']}")
-            summary.append(f"  - As origin: {asn_summary['as_origin_count']}")
-            summary.append(f"  - As transit: {asn_summary['as_transit_count']}")
-
-            # Classify ASN type based on behavior
-            if asn_summary["as_transit_count"] > asn_summary["as_origin_count"] * 2:
-                summary.append("")
-                summary.append("**Classification:** Likely a transit provider")
-            elif asn_summary["as_origin_count"] > asn_summary["as_transit_count"] * 2:
-                summary.append("")
-                summary.append("**Classification:** Likely a stub/edge network")
+            summary.append(f"  - As origin (end of path): {asn_summary['as_origin_count']}")
+            summary.append(f"  - As mid-path transit: {asn_summary['as_transit_count']}")
+            summary.append("")
+            summary.append(
+                "Note: 'mid-path transit' only counts paths TO this ASN's prefixes. "
+                "To see if this ASN provides transit to other networks, check the "
+                "downstream customers list above or use get_as_downstreams."
+            )
 
             return "\n".join(summary)
 
@@ -1202,3 +1257,60 @@ class BGPTools:
 
         except Exception as e:
             return f"Error getting connectivity summary for AS{asn}: {str(e)}"
+
+    async def start_monitoring(
+        self,
+        collectors: list[str] | None = None,
+    ) -> str:
+        """Start real-time BGP anomaly monitoring.
+
+        Starts the bgp-radar subprocess to monitor for hijacks, route leaks,
+        and blackholes from RIS Live data. Events will be displayed in real-time.
+
+        Args:
+            collectors: List of RIS collectors to monitor (e.g., ["rrc00", "rrc01"]).
+                       If not specified, uses the default collectors.
+
+        Returns:
+            Status message indicating monitoring has started.
+        """
+        if self._bgp_radar is None:
+            return "bgp-radar is not configured. Real-time monitoring is not available."
+
+        if self._bgp_radar.is_running:
+            current_collectors = ", ".join(self._bgp_radar._collectors)
+            return f"Monitoring is already running (collectors: {current_collectors})."
+
+        try:
+            await self._bgp_radar.start(collectors=collectors)
+            active_collectors = ", ".join(self._bgp_radar._collectors)
+            return (
+                f"**BGP Monitoring Started**\n\n"
+                f"Now watching for anomalies from collectors: {active_collectors}\n\n"
+                f"Events (hijacks, route leaks, blackholes) will be displayed in real-time as they are detected.\n\n"
+                f"Use stop_monitoring() or `/monitor stop` to stop monitoring."
+            )
+
+        except Exception as e:
+            return f"Error starting monitoring: {str(e)}"
+
+    async def stop_monitoring(self) -> str:
+        """Stop real-time BGP anomaly monitoring.
+
+        Stops the bgp-radar subprocess.
+
+        Returns:
+            Status message indicating monitoring has stopped.
+        """
+        if self._bgp_radar is None:
+            return "bgp-radar is not configured. Real-time monitoring is not available."
+
+        if not self._bgp_radar.is_running:
+            return "Monitoring is not running."
+
+        try:
+            await self._bgp_radar.stop()
+            return "**BGP Monitoring Stopped**\n\nReal-time anomaly detection has been stopped."
+
+        except Exception as e:
+            return f"Error stopping monitoring: {str(e)}"

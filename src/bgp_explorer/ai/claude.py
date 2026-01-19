@@ -4,7 +4,8 @@ import asyncio
 import inspect
 import json
 import os
-from typing import Any, Callable, Optional, get_type_hints
+from collections.abc import Callable
+from typing import Any, get_type_hints
 
 import anthropic
 
@@ -14,6 +15,7 @@ from bgp_explorer.ai.base import (
     ChatEvent,
     Message,
     Role,
+    ThinkingBlock,
     ToolCall,
     ToolResult,
 )
@@ -29,11 +31,12 @@ class ClaudeBackend(AIBackend):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model: str = "claude-sonnet-4-20250514",
-        system_prompt: Optional[str] = None,
+        api_key: str | None = None,
+        model: str = "claude-sonnet-4-5-20250929",
+        system_prompt: str | None = None,
         max_iterations: int = 10,
-        max_tokens: int = 4096,
+        max_tokens: int = 16000,
+        thinking_budget: int = 10000,
     ):
         """Initialize the Claude backend.
 
@@ -43,6 +46,7 @@ class ClaudeBackend(AIBackend):
             system_prompt: System prompt for the conversation.
             max_iterations: Maximum tool execution iterations.
             max_tokens: Maximum tokens in response.
+            thinking_budget: Maximum tokens for extended thinking (Claude uses what it needs).
 
         Raises:
             ValueError: If no API key is provided or found.
@@ -58,6 +62,7 @@ class ClaudeBackend(AIBackend):
         self._system_prompt = system_prompt
         self._max_iterations = max_iterations
         self._max_tokens = max_tokens
+        self._thinking_budget = thinking_budget
         self._tools: dict[str, Callable[..., Any]] = {}
         self._tool_schemas: list[dict[str, Any]] = []
         self._history: list[Message] = []
@@ -151,7 +156,7 @@ class ClaudeBackend(AIBackend):
         return type_map.get(python_type, "string")
 
     async def chat(
-        self, message: str, on_event: Optional[ChatCallback] = None
+        self, message: str, on_event: ChatCallback | None = None
     ) -> str:
         """Send a message and get a response.
 
@@ -178,11 +183,15 @@ class ClaudeBackend(AIBackend):
         while iterations < self._max_iterations:
             iterations += 1
 
-            # Call the model
+            # Call the model with extended thinking
             kwargs = {
                 "model": self._model_name,
                 "max_tokens": self._max_tokens,
                 "messages": messages,
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": self._thinking_budget,
+                },
             }
 
             if self._system_prompt:
@@ -193,12 +202,19 @@ class ClaudeBackend(AIBackend):
 
             response = self._client.messages.create(**kwargs)
 
-            # Process response
+            # Process response - capture thinking blocks for history
             tool_calls = []
             text_parts = []
+            thinking_blocks = []
 
             for block in response.content:
-                if block.type == "text":
+                if block.type == "thinking":
+                    # Extended thinking - must be preserved in history
+                    thinking_blocks.append(ThinkingBlock(
+                        thinking=block.thinking,
+                        signature=getattr(block, 'signature', None),
+                    ))
+                elif block.type == "text":
                     text_parts.append(block.text)
                 elif block.type == "tool_use":
                     tool_calls.append(
@@ -213,9 +229,14 @@ class ClaudeBackend(AIBackend):
                 # Execute tools and continue loop
                 tool_results = await self._execute_tools(tool_calls, on_event)
 
-                # Add assistant message with tool calls
+                # Add assistant message with tool calls and thinking blocks
                 self._history.append(
-                    Message(role=Role.ASSISTANT, content=None, tool_calls=tool_calls)
+                    Message(
+                        role=Role.ASSISTANT,
+                        content=None,
+                        tool_calls=tool_calls,
+                        thinking_blocks=thinking_blocks if thinking_blocks else None,
+                    )
                 )
 
                 # Add tool results
@@ -229,7 +250,11 @@ class ClaudeBackend(AIBackend):
                 # No tool calls or end of turn - return text response
                 response_text = "".join(text_parts)
                 self._history.append(
-                    Message(role=Role.ASSISTANT, content=response_text)
+                    Message(
+                        role=Role.ASSISTANT,
+                        content=response_text,
+                        thinking_blocks=thinking_blocks if thinking_blocks else None,
+                    )
                 )
                 if on_event:
                     on_event(ChatEvent(type="complete"))
@@ -240,7 +265,7 @@ class ClaudeBackend(AIBackend):
     async def _execute_tools(
         self,
         tool_calls: list[ToolCall],
-        on_event: Optional[ChatCallback] = None,
+        on_event: ChatCallback | None = None,
     ) -> list[ToolResult]:
         """Execute tool calls and return results.
 
@@ -322,9 +347,19 @@ class ClaudeBackend(AIBackend):
                 messages.append({"role": "user", "content": msg.content})
 
             elif msg.role == Role.ASSISTANT:
+                content = []
+
+                # Add thinking blocks first (required by API when thinking is enabled)
+                if msg.thinking_blocks:
+                    for tb in msg.thinking_blocks:
+                        content.append({
+                            "type": "thinking",
+                            "thinking": tb.thinking,
+                            "signature": tb.signature,
+                        })
+
+                # Add tool calls
                 if msg.tool_calls:
-                    # Assistant message with tool use
-                    content = []
                     for tc in msg.tool_calls:
                         content.append({
                             "type": "tool_use",
@@ -332,9 +367,16 @@ class ClaudeBackend(AIBackend):
                             "name": tc.name,
                             "input": tc.arguments,
                         })
+
+                # Add text content
+                if msg.content:
+                    content.append({
+                        "type": "text",
+                        "text": msg.content,
+                    })
+
+                if content:
                     messages.append({"role": "assistant", "content": content})
-                elif msg.content:
-                    messages.append({"role": "assistant", "content": msg.content})
 
             elif msg.role == Role.TOOL:
                 if msg.tool_results:

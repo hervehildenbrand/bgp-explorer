@@ -1,9 +1,10 @@
 """Abstract base class for AI backends."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal
 
 
 class Role(str, Enum):
@@ -29,8 +30,16 @@ class ToolResult:
     """Result of executing a tool call."""
 
     tool_call_id: str
-    output: Optional[str] = None
-    error: Optional[str] = None
+    output: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class ThinkingBlock:
+    """Represents Claude's extended thinking."""
+
+    thinking: str
+    signature: str | None = None  # For redacted thinking
 
 
 @dataclass
@@ -38,9 +47,10 @@ class Message:
     """A message in the conversation history."""
 
     role: Role
-    content: Optional[str] = None
-    tool_calls: Optional[list[ToolCall]] = None
-    tool_results: Optional[list[ToolResult]] = None
+    content: str | None = None
+    tool_calls: list[ToolCall] | None = None
+    tool_results: list[ToolResult] | None = None
+    thinking_blocks: list[ThinkingBlock] | None = None  # For extended thinking
 
     def to_dict(self) -> dict[str, Any]:
         """Convert message to dictionary."""
@@ -82,7 +92,7 @@ class AIBackend(ABC):
 
     @abstractmethod
     async def chat(
-        self, message: str, on_event: Optional[ChatCallback] = None
+        self, message: str, on_event: ChatCallback | None = None
     ) -> str:
         """Send a message and get a response.
 

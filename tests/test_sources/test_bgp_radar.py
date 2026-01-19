@@ -21,8 +21,8 @@ class TestBgpRadarClient:
 
     @pytest.mark.asyncio
     async def test_parse_event_hijack(self, client):
-        """Test parsing a hijack event from JSON."""
-        json_line = json.dumps({
+        """Test parsing a hijack event from bgp-radar log line."""
+        event_json = json.dumps({
             "type": "hijack",
             "severity": "high",
             "affected_prefix": "8.8.8.0/24",
@@ -31,8 +31,9 @@ class TestBgpRadarClient:
             "expected_origin": 15169,
             "observed_origin": 64496,
         })
+        log_line = f"2024/01/01 12:00:00 EVENT: {event_json}"
 
-        event = client._parse_event(json_line)
+        event = client._parse_event(log_line)
 
         assert event is not None
         assert event.type == EventType.HIJACK
@@ -43,15 +44,16 @@ class TestBgpRadarClient:
     @pytest.mark.asyncio
     async def test_parse_event_leak(self, client):
         """Test parsing a route leak event."""
-        json_line = json.dumps({
+        event_json = json.dumps({
             "type": "leak",
             "severity": "medium",
             "affected_prefix": "1.1.1.0/24",
             "affected_asn": 13335,
             "timestamp": "2024-01-01T12:00:00Z",
         })
+        log_line = f"2024/01/01 12:00:00 EVENT: {event_json}"
 
-        event = client._parse_event(json_line)
+        event = client._parse_event(log_line)
 
         assert event is not None
         assert event.type == EventType.LEAK
@@ -60,15 +62,16 @@ class TestBgpRadarClient:
     @pytest.mark.asyncio
     async def test_parse_event_blackhole(self, client):
         """Test parsing a blackhole event."""
-        json_line = json.dumps({
+        event_json = json.dumps({
             "type": "blackhole",
             "severity": "low",
             "affected_prefix": "192.0.2.0/24",
             "affected_asn": 64496,
             "timestamp": "2024-01-01T12:00:00Z",
         })
+        log_line = f"2024/01/01 12:00:00 EVENT: {event_json}"
 
-        event = client._parse_event(json_line)
+        event = client._parse_event(log_line)
 
         assert event is not None
         assert event.type == EventType.BLACKHOLE
@@ -76,13 +79,24 @@ class TestBgpRadarClient:
     @pytest.mark.asyncio
     async def test_parse_event_invalid_json(self, client):
         """Test parsing invalid JSON returns None."""
-        event = client._parse_event("not valid json")
+        event = client._parse_event("EVENT: not valid json")
         assert event is None
 
     @pytest.mark.asyncio
-    async def test_parse_event_non_event_json(self, client):
-        """Test parsing non-event JSON returns None."""
-        json_line = json.dumps({"info": "connected", "collectors": ["rrc00"]})
+    async def test_parse_event_non_event_line(self, client):
+        """Test parsing non-event log lines returns None."""
+        # STATS line should be ignored
+        event = client._parse_event("2024/01/01 12:00:00 STATS: updates=1000 (100/s)")
+        assert event is None
+
+        # Info line should be ignored
+        event = client._parse_event("2024/01/01 12:00:00 bgp-radar starting...")
+        assert event is None
+
+    @pytest.mark.asyncio
+    async def test_parse_event_without_prefix(self, client):
+        """Test that raw JSON without EVENT: prefix returns None."""
+        json_line = json.dumps({"type": "hijack", "severity": "high"})
         event = client._parse_event(json_line)
         assert event is None
 
@@ -218,3 +232,178 @@ class TestBgpRadarClient:
     async def test_is_running_false_when_not_started(self, client):
         """Test is_running returns False when not started."""
         assert client.is_running is False
+
+    @pytest.mark.asyncio
+    async def test_event_callback_invoked_on_add_event(self, client):
+        """Test that event callback is invoked when an event is added."""
+        received_events = []
+
+        def callback(event: BGPEvent) -> None:
+            received_events.append(event)
+
+        client.set_event_callback(callback)
+
+        event = BGPEvent(
+            type=EventType.HIJACK,
+            severity=Severity.HIGH,
+            affected_prefix="8.8.8.0/24",
+            detected_at=datetime.now(timezone.utc),
+        )
+        await client._add_event(event)
+
+        assert len(received_events) == 1
+        assert received_events[0] == event
+
+    @pytest.mark.asyncio
+    async def test_event_callback_not_invoked_when_not_set(self, client):
+        """Test that no error occurs when callback is not set."""
+        event = BGPEvent(
+            type=EventType.HIJACK,
+            severity=Severity.HIGH,
+            affected_prefix="8.8.8.0/24",
+            detected_at=datetime.now(timezone.utc),
+        )
+        # Should not raise
+        await client._add_event(event)
+        assert len(client._recent_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_event_callback_can_be_cleared(self, client):
+        """Test that event callback can be cleared."""
+        received_events = []
+
+        def callback(event: BGPEvent) -> None:
+            received_events.append(event)
+
+        client.set_event_callback(callback)
+        client.set_event_callback(None)
+
+        event = BGPEvent(
+            type=EventType.HIJACK,
+            severity=Severity.HIGH,
+            affected_prefix="8.8.8.0/24",
+            detected_at=datetime.now(timezone.utc),
+        )
+        await client._add_event(event)
+
+        assert len(received_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_event_filter_single_type(self, client):
+        """Test filtering events by single type."""
+        received_events = []
+
+        def callback(event: BGPEvent) -> None:
+            received_events.append(event)
+
+        client.set_event_callback(callback)
+        client.set_event_filter({EventType.HIJACK})
+
+        # Add hijack - should pass filter
+        hijack = BGPEvent(
+            type=EventType.HIJACK,
+            severity=Severity.HIGH,
+            affected_prefix="8.8.8.0/24",
+            detected_at=datetime.now(timezone.utc),
+        )
+        await client._add_event(hijack)
+
+        # Add leak - should be filtered out
+        leak = BGPEvent(
+            type=EventType.LEAK,
+            severity=Severity.MEDIUM,
+            affected_prefix="1.1.1.0/24",
+            detected_at=datetime.now(timezone.utc),
+        )
+        await client._add_event(leak)
+
+        assert len(received_events) == 1
+        assert received_events[0].type == EventType.HIJACK
+
+    @pytest.mark.asyncio
+    async def test_event_filter_multiple_types(self, client):
+        """Test filtering events by multiple types."""
+        received_events = []
+
+        def callback(event: BGPEvent) -> None:
+            received_events.append(event)
+
+        client.set_event_callback(callback)
+        client.set_event_filter({EventType.HIJACK, EventType.LEAK})
+
+        # Add all three types
+        for event_type in [EventType.HIJACK, EventType.LEAK, EventType.BLACKHOLE]:
+            event = BGPEvent(
+                type=event_type,
+                severity=Severity.HIGH,
+                affected_prefix="8.8.8.0/24",
+                detected_at=datetime.now(timezone.utc),
+            )
+            await client._add_event(event)
+
+        assert len(received_events) == 2
+        assert {e.type for e in received_events} == {EventType.HIJACK, EventType.LEAK}
+
+    @pytest.mark.asyncio
+    async def test_event_filter_empty_passes_all(self, client):
+        """Test that empty filter passes all events."""
+        received_events = []
+
+        def callback(event: BGPEvent) -> None:
+            received_events.append(event)
+
+        client.set_event_callback(callback)
+        client.set_event_filter(set())  # Empty filter = all events
+
+        for event_type in [EventType.HIJACK, EventType.LEAK, EventType.BLACKHOLE]:
+            event = BGPEvent(
+                type=event_type,
+                severity=Severity.HIGH,
+                affected_prefix="8.8.8.0/24",
+                detected_at=datetime.now(timezone.utc),
+            )
+            await client._add_event(event)
+
+        assert len(received_events) == 3
+
+    @pytest.mark.asyncio
+    async def test_event_filter_can_be_changed(self, client):
+        """Test that filter can be changed while running."""
+        received_events = []
+
+        def callback(event: BGPEvent) -> None:
+            received_events.append(event)
+
+        client.set_event_callback(callback)
+        client.set_event_filter({EventType.HIJACK})
+
+        # Add hijack - passes
+        await client._add_event(BGPEvent(
+            type=EventType.HIJACK,
+            severity=Severity.HIGH,
+            affected_prefix="8.8.8.0/24",
+            detected_at=datetime.now(timezone.utc),
+        ))
+
+        # Change filter to leak only
+        client.set_event_filter({EventType.LEAK})
+
+        # Add leak - now passes
+        await client._add_event(BGPEvent(
+            type=EventType.LEAK,
+            severity=Severity.MEDIUM,
+            affected_prefix="1.1.1.0/24",
+            detected_at=datetime.now(timezone.utc),
+        ))
+
+        # Add hijack - now filtered out
+        await client._add_event(BGPEvent(
+            type=EventType.HIJACK,
+            severity=Severity.HIGH,
+            affected_prefix="2.2.2.0/24",
+            detected_at=datetime.now(timezone.utc),
+        ))
+
+        assert len(received_events) == 2
+        assert received_events[0].type == EventType.HIJACK
+        assert received_events[1].type == EventType.LEAK

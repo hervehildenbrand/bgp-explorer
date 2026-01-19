@@ -10,7 +10,6 @@ import asyncio
 import json
 import os
 import shutil
-from typing import Optional
 
 from bgp_explorer.models.as_relationship import (
     ASConnectivity,
@@ -33,7 +32,7 @@ class MonocleClient(DataSource):
 
     def __init__(
         self,
-        binary_path: Optional[str] = None,
+        binary_path: str | None = None,
         timeout: float = 30.0,
         use_cache: bool = True,
     ):
@@ -113,7 +112,7 @@ class MonocleClient(DataSource):
                 process.communicate(),
                 timeout=self._timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             process.kill()
             raise TimeoutError(f"Monocle command timed out after {self._timeout}s")
 
@@ -129,8 +128,8 @@ class MonocleClient(DataSource):
     async def get_as_relationships(
         self,
         asn: int,
-        min_visibility: Optional[float] = None,
-        relationship_filter: Optional[str] = None,
+        min_visibility: float | None = None,
+        relationship_filter: str | None = None,
     ) -> list[ASRelationship]:
         """Get all relationships for an Autonomous System.
 
@@ -161,7 +160,7 @@ class MonocleClient(DataSource):
 
         return relationships
 
-    async def get_as_peers(self, asn: int, min_visibility: Optional[float] = None) -> list[ASRelationship]:
+    async def get_as_peers(self, asn: int, min_visibility: float | None = None) -> list[ASRelationship]:
         """Get all peer relationships for an AS.
 
         Args:
@@ -175,7 +174,7 @@ class MonocleClient(DataSource):
             asn, min_visibility=min_visibility, relationship_filter="peer"
         )
 
-    async def get_as_upstreams(self, asn: int, min_visibility: Optional[float] = None) -> list[ASRelationship]:
+    async def get_as_upstreams(self, asn: int, min_visibility: float | None = None) -> list[ASRelationship]:
         """Get upstream providers for an AS.
 
         Args:
@@ -189,7 +188,7 @@ class MonocleClient(DataSource):
             asn, min_visibility=min_visibility, relationship_filter="upstream"
         )
 
-    async def get_as_downstreams(self, asn: int, min_visibility: Optional[float] = None) -> list[ASRelationship]:
+    async def get_as_downstreams(self, asn: int, min_visibility: float | None = None) -> list[ASRelationship]:
         """Get downstream customers of an AS.
 
         Args:
@@ -207,7 +206,7 @@ class MonocleClient(DataSource):
         self,
         asn1: int,
         asn2: int,
-    ) -> Optional[ASRelationship]:
+    ) -> ASRelationship | None:
         """Check the relationship between two specific ASes.
 
         Args:

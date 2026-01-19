@@ -2,8 +2,8 @@
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 
 @dataclass
@@ -52,14 +52,14 @@ class TTLCache:
                 return default
 
             # Check if expired
-            if datetime.now(timezone.utc) > entry.expires_at:
+            if datetime.now(UTC) > entry.expires_at:
                 del self._cache[key]
                 return default
 
             return entry.value
 
     async def set(
-        self, key: str, value: Any, ttl: Optional[timedelta] = None
+        self, key: str, value: Any, ttl: timedelta | None = None
     ) -> None:
         """Set a value in the cache.
 
@@ -71,7 +71,7 @@ class TTLCache:
         if ttl is None:
             ttl = self.default_ttl
 
-        expires_at = datetime.now(timezone.utc) + ttl
+        expires_at = datetime.now(UTC) + ttl
 
         async with self._lock:
             self._cache[key] = CacheEntry(value=value, expires_at=expires_at)
@@ -99,7 +99,7 @@ class TTLCache:
             if entry is None:
                 return False
 
-            if datetime.now(timezone.utc) > entry.expires_at:
+            if datetime.now(UTC) > entry.expires_at:
                 del self._cache[key]
                 return False
 
@@ -112,7 +112,7 @@ class TTLCache:
             Number of entries removed.
         """
         async with self._lock:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             expired_keys = [
                 key
                 for key, entry in self._cache.items()

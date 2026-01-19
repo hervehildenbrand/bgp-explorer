@@ -6,17 +6,15 @@ See: https://publicdata.caida.org/datasets/peeringdb/
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
 
 import aiohttp
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn
+from rich.progress import BarColumn, DownloadColumn, Progress, SpinnerColumn, TextColumn
 
 from bgp_explorer.models.ixp import IXP, IXPPresence, Network
 from bgp_explorer.sources.base import DataSource
-
 
 # Default cache directory
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "bgp-explorer" / "peeringdb"
@@ -42,8 +40,8 @@ class PeeringDBClient(DataSource):
 
     def __init__(
         self,
-        cache_dir: Optional[Path] = None,
-        console: Optional[Console] = None,
+        cache_dir: Path | None = None,
+        console: Console | None = None,
     ):
         """Initialize the client.
 
@@ -54,7 +52,7 @@ class PeeringDBClient(DataSource):
         """
         self._cache_dir = cache_dir or DEFAULT_CACHE_DIR
         self._console = console or Console()
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._loaded = False
 
         # In-memory indexes
@@ -129,7 +127,7 @@ class PeeringDBClient(DataSource):
         try:
             meta = json.loads(self.metadata_file.read_text())
             download_date = datetime.fromisoformat(meta["download_date"])
-            age = datetime.now(timezone.utc) - download_date
+            age = datetime.now(UTC) - download_date
             return age > timedelta(days=CACHE_MAX_AGE_DAYS)
         except (json.JSONDecodeError, KeyError, ValueError):
             return True
@@ -147,7 +145,7 @@ class PeeringDBClient(DataSource):
 
         # Save metadata
         self.metadata_file.write_text(json.dumps({
-            "download_date": datetime.now(timezone.utc).isoformat(),
+            "download_date": datetime.now(UTC).isoformat(),
             "source_url": dump_url,
         }))
 
@@ -164,7 +162,7 @@ class PeeringDBClient(DataSource):
             raise RuntimeError("Client not connected")
 
         # Try current month first, then previous month
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for month_offset in range(3):  # Try current month and 2 previous
             check_date = now - timedelta(days=month_offset * 30)
             year = check_date.year
@@ -225,7 +223,7 @@ class PeeringDBClient(DataSource):
 
         # Atomic rename
         temp_dest.rename(dest)
-        self._console.print(f"[green]Downloaded PeeringDB data[/green]")
+        self._console.print("[green]Downloaded PeeringDB data[/green]")
 
     async def _load_data(self) -> None:
         """Load and parse PeeringDB data from cache file."""
@@ -364,7 +362,7 @@ class PeeringDBClient(DataSource):
 
         return self._ixp_to_asns.get(ixp_id, [])
 
-    def get_ixp_details(self, ixp_id_or_name: int | str) -> Optional[IXP]:
+    def get_ixp_details(self, ixp_id_or_name: int | str) -> IXP | None:
         """Get detailed information about an IXP.
 
         Args:
@@ -403,7 +401,7 @@ class PeeringDBClient(DataSource):
 
         return results
 
-    def get_network_info(self, asn: int) -> Optional[Network]:
+    def get_network_info(self, asn: int) -> Network | None:
         """Get network information by ASN.
 
         Args:
@@ -415,7 +413,7 @@ class PeeringDBClient(DataSource):
         self._ensure_loaded()
         return self._asn_to_net.get(asn)
 
-    def _resolve_ixp_id(self, ixp_id_or_name: int | str) -> Optional[int]:
+    def _resolve_ixp_id(self, ixp_id_or_name: int | str) -> int | None:
         """Resolve an IXP identifier to an IXP ID.
 
         Args:

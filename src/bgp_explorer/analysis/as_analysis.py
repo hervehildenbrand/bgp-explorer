@@ -1,6 +1,5 @@
 """AS (Autonomous System) analysis utilities."""
 
-from collections import Counter, defaultdict
 from typing import Any
 
 from bgp_explorer.models.route import BGPRoute

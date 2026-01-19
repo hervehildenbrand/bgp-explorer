@@ -1,5 +1,9 @@
 # BGP Explorer
 
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/hervehildenbrand/bgp-explorer/actions/workflows/test.yml/badge.svg)](https://github.com/hervehildenbrand/bgp-explorer/actions/workflows/test.yml)
+
 AI-powered CLI for querying live and historical internet routing data using natural language.
 
 ## Features
@@ -10,7 +14,7 @@ AI-powered CLI for querying live and historical internet routing data using natu
   - bgp-radar for real-time anomaly detection (hijacks, leaks, blackholes)
   - Globalping for worldwide network testing (ping, traceroute)
   - BGPStream for historical BGP archives
-- **AI-Powered Analysis**: Gemini or Claude AI analyzes routing data and provides insights
+- **AI-Powered Analysis**: Claude AI analyzes routing data and provides insights
 - **Path Analysis**: AS path diversity, upstream/downstream relationships, prepending detection
 - **RPKI Validation**: Check route origin validation status
 - **Anomaly Detection**: Real-time hijack, route leak, and blackhole detection
@@ -40,9 +44,7 @@ uv sync --extra bgpstream
 ## Prerequisites
 
 - **Python 3.11+**
-- **AI API Key** (one of):
-  - Gemini API Key from [Google AI Studio](https://aistudio.google.com/)
-  - Anthropic API Key from [Anthropic Console](https://console.anthropic.com/)
+- **Anthropic API Key** from [Anthropic Console](https://console.anthropic.com/)
 - **bgp-radar** (optional): For real-time anomaly detection
   ```bash
   go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest
@@ -58,8 +60,7 @@ cp .env.example .env
 
 Edit `.env`:
 ```bash
-# AI Backend (choose one)
-GEMINI_API_KEY=your_gemini_key_here
+# AI Backend
 ANTHROPIC_API_KEY=your_anthropic_key_here
 
 # Optional: bgp-radar path (defaults to PATH lookup)
@@ -71,11 +72,7 @@ BGP_RADAR_PATH=/path/to/bgp-radar
 ### Start Interactive Chat
 
 ```bash
-# With Gemini (default)
 uv run bgp-explorer chat
-
-# With Claude
-uv run bgp-explorer chat --backend claude
 ```
 
 ### CLI Options
@@ -84,7 +81,6 @@ uv run bgp-explorer chat --backend claude
 uv run bgp-explorer chat [OPTIONS]
 
 Options:
-  --backend [gemini|claude]  AI backend to use (default: gemini)
   --api-key TEXT             API key for the AI backend
   --bgp-radar-path TEXT      Path to bgp-radar binary
   --collectors TEXT          Comma-separated list of RIS collectors (default: rrc00)
@@ -207,7 +203,6 @@ src/bgp_explorer/
 │   └── as_analysis.py    # ASN relationship analysis
 └── ai/              # AI backends
     ├── base.py      # Abstract base class
-    ├── gemini.py    # Gemini implementation
     ├── claude.py    # Claude implementation
     └── tools.py     # Tool definitions
 ```

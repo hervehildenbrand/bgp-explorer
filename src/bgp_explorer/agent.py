@@ -3,14 +3,11 @@
 The agent coordinates between the AI backend, data sources, and output formatting.
 """
 
-import asyncio
-from typing import Optional
 
 from bgp_explorer.ai.base import AIBackend, ChatCallback
 from bgp_explorer.ai.claude import ClaudeBackend
-from bgp_explorer.ai.gemini import GeminiBackend
 from bgp_explorer.ai.tools import BGPTools
-from bgp_explorer.config import AIBackendType, Settings
+from bgp_explorer.config import Settings
 from bgp_explorer.output import OutputFormatter
 from bgp_explorer.sources.bgp_radar import BgpRadarClient
 from bgp_explorer.sources.globalping import GlobalpingClient
@@ -41,13 +38,13 @@ class BGPExplorerAgent:
         """
         self._settings = settings
         self._output = output
-        self._ai: Optional[AIBackend] = None
-        self._ripe_stat: Optional[RipeStatClient] = None
-        self._bgp_radar: Optional[BgpRadarClient] = None
-        self._globalping: Optional[GlobalpingClient] = None
-        self._peeringdb: Optional[PeeringDBClient] = None
-        self._monocle: Optional[MonocleClient] = None
-        self._tools: Optional[BGPTools] = None
+        self._ai: AIBackend | None = None
+        self._ripe_stat: RipeStatClient | None = None
+        self._bgp_radar: BgpRadarClient | None = None
+        self._globalping: GlobalpingClient | None = None
+        self._peeringdb: PeeringDBClient | None = None
+        self._monocle: MonocleClient | None = None
+        self._tools: BGPTools | None = None
         self._running = False
 
     async def initialize(self) -> None:
@@ -62,16 +59,17 @@ class BGPExplorerAgent:
         await self._ripe_stat.connect()
         self._output.display_info("✓ Connected to RIPE Stat")
 
-        # Initialize bgp-radar client (optional)
+        # Initialize bgp-radar client (optional, opt-in monitoring)
         try:
             self._bgp_radar = BgpRadarClient(
                 binary_path=self._settings.bgp_radar_path,
                 collectors=self._settings.collectors,
             )
             if await self._bgp_radar.is_available():
-                await self._bgp_radar.start()
+                # Wire up event callback for real-time display
+                self._bgp_radar.set_event_callback(self._on_bgp_event)
                 self._output.display_info(
-                    f"✓ Started bgp-radar (collectors: {', '.join(self._settings.collectors)})"
+                    "✓ bgp-radar available (use /monitor start or ask to begin monitoring)"
                 )
             else:
                 self._output.display_info(
@@ -114,12 +112,13 @@ class BGPExplorerAgent:
             self._output.display_info(f"⚠ Monocle unavailable: {e}")
             self._monocle = None
 
-        # Initialize AI backend
-        self._ai = self._create_ai_backend()
-        backend_info = self._settings.ai_backend.value
-        if self._settings.ai_backend == AIBackendType.CLAUDE:
-            backend_info = f"claude/{self._settings.claude_model.value}"
-        self._output.display_info(f"✓ AI backend ready ({backend_info})")
+        # Initialize AI backend (Claude)
+        self._ai = ClaudeBackend(
+            api_key=self._settings.get_api_key(),
+            model=self._settings.claude_model.model_id,
+            system_prompt=self._settings.system_prompt,
+        )
+        self._output.display_info(f"✓ AI backend ready (claude/{self._settings.claude_model.value})")
 
         # Initialize and register tools
         self._tools = BGPTools(
@@ -136,46 +135,8 @@ class BGPExplorerAgent:
         self._running = True
         self._output.display_info("")
 
-    def _create_ai_backend(self) -> AIBackend:
-        """Create the appropriate AI backend based on settings.
-
-        Returns:
-            Configured AI backend instance.
-
-        Raises:
-            ValueError: If backend type is not supported.
-        """
-        if self._settings.ai_backend == AIBackendType.GEMINI:
-            if self._settings.use_oauth:
-                # Use OAuth authentication
-                from bgp_explorer.ai.oauth import get_oauth_credentials
-
-                credentials = get_oauth_credentials(
-                    client_secret_path=self._settings.oauth_client_secret
-                )
-                return GeminiBackend(
-                    credentials=credentials,
-                    model=self._settings.gemini_model,
-                    system_prompt=self._settings.system_prompt,
-                )
-            else:
-                # Use API key authentication
-                return GeminiBackend(
-                    api_key=self._settings.get_api_key(),
-                    model=self._settings.gemini_model,
-                    system_prompt=self._settings.system_prompt,
-                )
-        elif self._settings.ai_backend == AIBackendType.CLAUDE:
-            return ClaudeBackend(
-                api_key=self._settings.get_api_key(),
-                model=self._settings.claude_model.model_id,
-                system_prompt=self._settings.system_prompt,
-            )
-        else:
-            raise ValueError(f"Unknown AI backend: {self._settings.ai_backend}")
-
     async def chat(
-        self, message: str, on_event: Optional[ChatCallback] = None
+        self, message: str, on_event: ChatCallback | None = None
     ) -> str:
         """Process a user message and return the response.
 
@@ -222,11 +183,135 @@ class BGPExplorerAgent:
             self._output.display_welcome()
             return True
 
+        elif cmd == "monitor":
+            await self._handle_monitor_command(args)
+            return True
+
         return False
+
+    async def _handle_monitor_command(self, args: str | None) -> None:
+        """Handle /monitor subcommands.
+
+        Args:
+            args: Subcommand and arguments (start, stop, status, filter).
+        """
+        from bgp_explorer.models.event import EventType
+
+        if self._bgp_radar is None:
+            self._output.display_error(
+                "bgp-radar is not available. Real-time monitoring requires bgp-radar to be installed."
+            )
+            return
+
+        parts = (args or "").strip().lower().split()
+        subcommand = parts[0] if parts else ""
+        type_args = parts[1:] if len(parts) > 1 else []
+
+        # Parse event types from arguments
+        def parse_event_types(type_names: list[str]) -> set[EventType]:
+            valid_types = {"hijack": EventType.HIJACK, "leak": EventType.LEAK, "blackhole": EventType.BLACKHOLE}
+            result = set()
+            for name in type_names:
+                if name in valid_types:
+                    result.add(valid_types[name])
+            return result
+
+        def format_filter(event_filter: set[EventType]) -> str:
+            if not event_filter:
+                return "all events"
+            return ", ".join(sorted(t.value for t in event_filter))
+
+        if subcommand == "start":
+            if self._bgp_radar.is_running:
+                self._output.display_info(
+                    f"Monitoring is already running (collectors: {', '.join(self._bgp_radar._collectors)})"
+                )
+            else:
+                # Apply filter if specified
+                event_filter = parse_event_types(type_args)
+                self._bgp_radar.set_event_filter(event_filter)
+                await self._bgp_radar.start()
+                # Enable split terminal mode for event display
+                self._output.enable_monitoring_mode()
+                filter_msg = f"filter: {format_filter(event_filter)}"
+                self._output.display_info(
+                    f"✓ Started BGP monitoring (collectors: {', '.join(self._bgp_radar._collectors)}, {filter_msg})\n"
+                    "  Events will be displayed in real-time as they are detected."
+                )
+
+        elif subcommand == "stop":
+            if not self._bgp_radar.is_running:
+                self._output.display_info("Monitoring is not running.")
+            else:
+                await self._bgp_radar.stop()
+                # Disable split terminal mode
+                self._output.disable_monitoring_mode()
+                self._output.display_info("✓ BGP monitoring stopped.")
+
+        elif subcommand == "status":
+            if self._bgp_radar.is_running:
+                current_filter = self._bgp_radar.event_filter
+                filter_msg = format_filter(current_filter)
+                self._output.display_info(
+                    f"Monitoring is running\n"
+                    f"  Collectors: {', '.join(self._bgp_radar._collectors)}\n"
+                    f"  Filter: {filter_msg}"
+                )
+            else:
+                self._output.display_info("Monitoring is not running.")
+
+        elif subcommand == "filter":
+            if not self._bgp_radar.is_running:
+                self._output.display_info("Monitoring is not running. Use /monitor start first.")
+            else:
+                event_filter = parse_event_types(type_args)
+                self._bgp_radar.set_event_filter(event_filter)
+                self._output.display_info(f"✓ Filter updated: {format_filter(event_filter)}")
+
+        else:
+            self._output.display_info(
+                "Usage: /monitor <start|stop|status|filter> [types...]\n"
+                "  start [types]  - Start monitoring (optionally filter by type)\n"
+                "  stop           - Stop monitoring\n"
+                "  status         - Check monitoring status and current filter\n"
+                "  filter [types] - Change filter while running (no types = all)\n"
+                "\n"
+                "Event types: hijack, leak, blackhole\n"
+                "Examples:\n"
+                "  /monitor start           - Watch all events\n"
+                "  /monitor start hijack    - Only hijacks\n"
+                "  /monitor filter leak     - Switch to only leaks"
+            )
+
+    def _on_bgp_event(self, event) -> None:
+        """Callback invoked when a BGP event is detected.
+
+        Args:
+            event: BGPEvent from bgp-radar.
+        """
+        monitoring_status = self.get_monitoring_status()
+        self._output.display_bgp_event(event, monitoring_status)
+
+    def get_monitoring_status(self) -> str | None:
+        """Get current monitoring status for display.
+
+        Returns:
+            Status string if monitoring is active, None otherwise.
+        """
+        if not self._bgp_radar or not self._bgp_radar.is_running:
+            return None
+
+        event_filter = self._bgp_radar.event_filter
+        if not event_filter:
+            return "all events"
+        return ", ".join(sorted(t.value for t in event_filter))
 
     async def shutdown(self) -> None:
         """Shutdown the agent and cleanup resources."""
         self._running = False
+
+        # Disable split terminal mode before cleanup
+        self._output.disable_monitoring_mode()
 
         if self._bgp_radar:
             await self._bgp_radar.stop()

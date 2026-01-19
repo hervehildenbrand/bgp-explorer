@@ -1,7 +1,6 @@
 """IXP (Internet Exchange Point) data models for PeeringDB integration."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -21,8 +20,8 @@ class IXP:
     name: str
     city: str
     country: str
-    website: Optional[str] = None
-    participant_count: Optional[int] = None
+    website: str | None = None
+    participant_count: int | None = None
 
     def to_dict(self) -> dict:
         """Convert IXP to dictionary for JSON serialization."""
@@ -61,8 +60,8 @@ class Network:
 
     asn: int
     name: str
-    info_type: Optional[str] = None
-    website: Optional[str] = None
+    info_type: str | None = None
+    website: str | None = None
 
     def to_dict(self) -> dict:
         """Convert Network to dictionary for JSON serialization."""
@@ -100,9 +99,9 @@ class IXPPresence:
     asn: int
     ixp_id: int
     ixp_name: str
-    ipaddr4: Optional[str] = None
-    ipaddr6: Optional[str] = None
-    speed: Optional[int] = None
+    ipaddr4: str | None = None
+    ipaddr6: str | None = None
+    speed: int | None = None
 
     def to_dict(self) -> dict:
         """Convert IXPPresence to dictionary for JSON serialization."""

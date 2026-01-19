@@ -10,8 +10,7 @@ API Docs: https://globalping.io/docs/api
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import timedelta
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 
@@ -30,14 +29,14 @@ class ProbeResult:
     status: str
     raw_output: str
     # Ping/MTR stats
-    min_latency: Optional[float] = None
-    avg_latency: Optional[float] = None
-    max_latency: Optional[float] = None
-    packet_loss: Optional[float] = None
+    min_latency: float | None = None
+    avg_latency: float | None = None
+    max_latency: float | None = None
+    packet_loss: float | None = None
     # Traceroute/MTR hops
-    hops: Optional[list[dict[str, Any]]] = None
+    hops: list[dict[str, Any]] | None = None
     # DNS answers
-    dns_answers: Optional[list[dict[str, Any]]] = None
+    dns_answers: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProbeResult":
@@ -110,7 +109,7 @@ class GlobalpingClient(DataSource):
 
     def __init__(
         self,
-        api_token: Optional[str] = None,
+        api_token: str | None = None,
         timeout: float = 30.0,
         poll_interval: float = 1.0,
         max_polls: int = 60,
@@ -127,7 +126,7 @@ class GlobalpingClient(DataSource):
         self._timeout = timeout
         self._poll_interval = poll_interval
         self._max_polls = max_polls
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     async def connect(self) -> None:
         """Create HTTP session."""
@@ -158,7 +157,7 @@ class GlobalpingClient(DataSource):
 
     def _parse_locations(
         self,
-        locations: Optional[list[dict[str, Any] | str]] = None,
+        locations: list[dict[str, Any] | str] | None = None,
         limit: int = 3,
     ) -> list[dict[str, Any]]:
         """Parse and validate location specifications.
@@ -259,8 +258,8 @@ class GlobalpingClient(DataSource):
         self,
         measurement_type: str,
         target: str,
-        locations: Optional[list[dict[str, Any]]] = None,
-        options: Optional[dict[str, Any]] = None,
+        locations: list[dict[str, Any]] | None = None,
+        options: dict[str, Any] | None = None,
         limit: int = 3,
     ) -> str:
         """Create a new measurement.
@@ -355,8 +354,8 @@ class GlobalpingClient(DataSource):
         self,
         measurement_type: str,
         target: str,
-        locations: Optional[list[dict[str, Any]]] = None,
-        options: Optional[dict[str, Any]] = None,
+        locations: list[dict[str, Any]] | None = None,
+        options: dict[str, Any] | None = None,
         limit: int = 3,
     ) -> MeasurementResult:
         """Run a complete measurement cycle.
@@ -393,7 +392,7 @@ class GlobalpingClient(DataSource):
     async def ping(
         self,
         target: str,
-        locations: Optional[list[dict[str, Any]]] = None,
+        locations: list[dict[str, Any]] | None = None,
         packets: int = 3,
         limit: int = 3,
     ) -> MeasurementResult:
@@ -414,9 +413,9 @@ class GlobalpingClient(DataSource):
     async def traceroute(
         self,
         target: str,
-        locations: Optional[list[dict[str, Any]]] = None,
+        locations: list[dict[str, Any]] | None = None,
         protocol: str = "ICMP",
-        port: Optional[int] = None,
+        port: int | None = None,
         limit: int = 3,
     ) -> MeasurementResult:
         """Run traceroute from global probes.
@@ -440,7 +439,7 @@ class GlobalpingClient(DataSource):
     async def mtr(
         self,
         target: str,
-        locations: Optional[list[dict[str, Any]]] = None,
+        locations: list[dict[str, Any]] | None = None,
         packets: int = 3,
         protocol: str = "ICMP",
         limit: int = 3,
@@ -466,9 +465,9 @@ class GlobalpingClient(DataSource):
     async def dns(
         self,
         domain: str,
-        locations: Optional[list[dict[str, Any]]] = None,
+        locations: list[dict[str, Any]] | None = None,
         query_type: str = "A",
-        resolver: Optional[str] = None,
+        resolver: str | None = None,
         limit: int = 3,
     ) -> MeasurementResult:
         """Run DNS lookup from global probes.
