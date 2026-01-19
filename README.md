@@ -9,28 +9,58 @@ AI-powered CLI for querying live and historical internet routing data using natu
 ## Features
 
 - **Natural Language Queries**: Ask questions about BGP routing in plain English
+- **Multi-Step Agentic Investigation**: Claude autonomously decides which tools to call based on your question
 - **Multiple Data Sources**:
   - RIPE Stat API for historical and current BGP state
   - bgp-radar for real-time anomaly detection (hijacks, leaks, blackholes)
   - Globalping for worldwide network testing (ping, traceroute)
+  - PeeringDB for network and contact information
+  - Monocle for AS relationship data (peers, upstreams, downstreams)
   - BGPStream for historical BGP archives
 - **AI-Powered Analysis**: Claude AI analyzes routing data and provides insights
+- **Thinking Summaries**: See Claude's reasoning process as it investigates
+- **Contact Lookup**: Find NOC contacts from PeeringDB for incident coordination
 - **Path Analysis**: AS path diversity, upstream/downstream relationships, prepending detection
 - **RPKI Validation**: Check route origin validation status
 - **Anomaly Detection**: Real-time hijack, route leak, and blackhole detection
 
-## Installation
+## Quick Start
 
 ```bash
-# Clone the repository
 git clone https://github.com/hervehildenbrand/bgp-explorer.git
 cd bgp-explorer
-
-# Install with uv
 uv sync
+uv run bgp-explorer install-deps  # Auto-installs Go + Rust + binaries
+uv run bgp-explorer chat          # All 22 tools ready!
+```
 
-# Or install with pip
-pip install -e .
+## Prerequisites
+
+- **Python 3.11+**
+- **[uv](https://docs.astral.sh/uv/)** - Fast Python package manager
+- **Anthropic API Key** from [Anthropic Console](https://console.anthropic.com/)
+
+### External Dependencies (Auto-installed)
+
+The `install-deps` command automatically installs:
+
+- **Go** (if missing) - Downloads and extracts to `~/.local/go`
+- **Rust** (if missing) - Installs via rustup
+- **bgp-radar** - Real-time BGP anomaly detection (`go install`)
+- **monocle** - AS relationship data from BGPKIT (`cargo install`)
+
+Binaries are auto-detected in `~/go/bin` and `~/.cargo/bin`.
+
+### Manual Installation (Alternative)
+
+If you prefer to install dependencies manually:
+
+```bash
+# bgp-radar (requires Go)
+go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest
+
+# monocle (requires Rust)
+cargo install monocle
 ```
 
 ### Optional Dependencies
@@ -40,20 +70,6 @@ pip install -e .
 brew install bgpstream  # macOS
 uv sync --extra bgpstream
 ```
-
-## Prerequisites
-
-- **Python 3.11+**
-- **Anthropic API Key** from [Anthropic Console](https://console.anthropic.com/)
-- **bgp-radar** (required): Real-time anomaly detection
-  ```bash
-  go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest
-  ```
-- **monocle** (required): AS relationship data
-  ```bash
-  # See https://github.com/bgpkit/monocle for installation
-  cargo install monocle
-  ```
 
 ## Configuration
 
@@ -128,7 +144,22 @@ Options:
 > What happened to 1.2.3.0/24 last week?
 ```
 
-## Available Tools
+### AS Relationships & Contacts
+```
+> What are the upstream providers for AS64496?
+> Show me all peers of Cloudflare
+> Who do I contact about AS15169?
+> Is AS12345 a legitimate provider?
+```
+
+### Incident Investigation
+```
+> Our customers can't reach our prefix 203.0.113.0/24
+> Why is traffic taking weird paths to 8.8.8.0/24?
+> Should we peer with AS64496?
+```
+
+## Available Tools (22 total)
 
 | Tool | Description |
 |------|-------------|
@@ -140,11 +171,27 @@ Options:
 | `compare_collectors` | Compare routing views across collectors, detect inconsistencies |
 | `get_rpki_status` | RPKI validation (valid/invalid/not-found) |
 | `get_anomalies` | Real-time BGP anomalies from bgp-radar |
-| `ping_from_global` | Ping from worldwide vantage points (requires Globalping) |
-| `traceroute_from_global` | Traceroute from multiple locations (requires Globalping) |
+| `ping_from_global` | Ping from worldwide vantage points |
+| `traceroute_from_global` | Traceroute from multiple locations |
+| `get_as_relationships` | Get all relationships for an AS (peers, upstreams, downstreams) |
+| `get_as_connectivity` | Get connectivity summary for an AS |
+| `check_as_relationship` | Check relationship between two specific ASes |
+| `get_network_contacts` | Get NOC/abuse contacts from PeeringDB |
+| `search_asn` | Search for ASN by name or description |
+| `get_ixp_presence` | Get IXP presence for an ASN |
 
 ## Commands
 
+### CLI Commands
+```bash
+uv run bgp-explorer install-deps  # Auto-install Go, Rust, bgp-radar, monocle
+uv run bgp-explorer chat          # Start interactive chat
+```
+
+### Chat Commands
+- `/monitor start` - Start real-time BGP monitoring
+- `/monitor stop` - Stop monitoring
+- `/monitor status` - Check monitoring status
 - `/export [path]` - Export conversation to JSON
 - `/clear` - Clear conversation history
 - `/help` - Show help message
@@ -170,19 +217,24 @@ User → CLI (cli.py) → Agent (agent.py) → AI Backend (claude)
 | **RIPE Stat** | REST API | Current BGP state, routing history, RPKI validation |
 | **bgp-radar** | Subprocess | Real-time anomaly detection (hijacks, leaks, blackholes) |
 | **Globalping** | REST API | Global ping, traceroute, MTR, DNS measurements |
+| **PeeringDB** | CAIDA dump | Network info, IXP presence, NOC contacts |
+| **Monocle** | CLI | AS relationships (peers, upstreams, downstreams) from BGP data |
 | **BGPStream** | Library | Historical BGP data from RouteViews and RIPE RIS |
 
 ## Development
 
 ```bash
 # Install with dev dependencies
-uv sync --dev
+uv sync --extra dev
 
 # Run tests
 uv run pytest
 
 # Run tests with coverage
 uv run pytest --cov=bgp_explorer
+
+# Run linter
+uv run ruff check src/
 
 # Run specific test file
 uv run pytest tests/test_models/test_route.py -v
