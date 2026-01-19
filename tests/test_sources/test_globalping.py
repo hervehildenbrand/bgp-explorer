@@ -268,21 +268,86 @@ class TestGlobalpingClient:
         loc2 = client._parse_locations(["EU"])
         assert loc2 == [{"continent": "EU", "limit": 3}]
 
-        # Test with region alias
-        loc3 = client._parse_locations(["US"])
-        assert loc3 == [{"continent": "NA", "limit": 3}]
-
-        # Test with 2-letter country code
-        loc4 = client._parse_locations(["DE"])
-        assert loc4 == [{"country": "DE", "limit": 3}]
+        # Test with 2-letter country code (not in country_map)
+        loc3 = client._parse_locations(["DE"])
+        assert loc3 == [{"country": "DE", "limit": 3}]
 
         # Test mixed string and dict
-        loc5 = client._parse_locations(["EU", {"country": "US"}])
-        assert loc5 == [{"continent": "EU", "limit": 3}, {"country": "US", "limit": 3}]
+        loc4 = client._parse_locations(["EU", {"country": "US"}])
+        assert loc4 == [{"continent": "EU", "limit": 3}, {"country": "US", "limit": 3}]
 
         # Test multiple regions
-        loc6 = client._parse_locations(["Europe", "Asia"])
-        assert loc6 == [{"continent": "EU", "limit": 3}, {"continent": "AS", "limit": 3}]
+        loc5 = client._parse_locations(["Europe", "Asia"])
+        assert loc5 == [{"continent": "EU", "limit": 3}, {"continent": "AS", "limit": 3}]
+
+    @pytest.mark.asyncio
+    async def test_locations_parsing_country_names(self, client):
+        """Test that country names/aliases are correctly parsed as countries, not continents.
+
+        This is critical for user intent: "from the US" should mean United States probes only,
+        not all of North America.
+        """
+        # "US" should map to country, not continent NA
+        loc1 = client._parse_locations(["US"])
+        assert loc1 == [{"country": "US", "limit": 3}]
+
+        # "USA" should also map to country US
+        loc2 = client._parse_locations(["USA"])
+        assert loc2 == [{"country": "US", "limit": 3}]
+
+        # "United States" should map to country US
+        loc3 = client._parse_locations(["United States"])
+        assert loc3 == [{"country": "US", "limit": 3}]
+
+        # "UK" should map to country GB
+        loc4 = client._parse_locations(["UK"])
+        assert loc4 == [{"country": "GB", "limit": 3}]
+
+        # "Germany" should map to country DE
+        loc5 = client._parse_locations(["Germany"])
+        assert loc5 == [{"country": "DE", "limit": 3}]
+
+        # "Australia" should map to country AU, not continent OC
+        loc6 = client._parse_locations(["Australia"])
+        assert loc6 == [{"country": "AU", "limit": 3}]
+
+        # Case insensitive
+        loc7 = client._parse_locations(["us"])
+        assert loc7 == [{"country": "US", "limit": 3}]
+
+        loc8 = client._parse_locations(["Us"])
+        assert loc8 == [{"country": "US", "limit": 3}]
+
+        # Multiple countries
+        loc9 = client._parse_locations(["US", "Germany", "Japan"])
+        assert loc9 == [
+            {"country": "US", "limit": 3},
+            {"country": "DE", "limit": 3},
+            {"country": "JP", "limit": 3},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_locations_parsing_continent_vs_country(self, client):
+        """Test that continent and country filters are distinguished correctly."""
+        # "North America" should be continent NA
+        loc1 = client._parse_locations(["North America"])
+        assert loc1 == [{"continent": "NA", "limit": 3}]
+
+        # "NA" should be continent NA
+        loc2 = client._parse_locations(["NA"])
+        assert loc2 == [{"continent": "NA", "limit": 3}]
+
+        # "US" should be country US (not continent NA)
+        loc3 = client._parse_locations(["US"])
+        assert loc3 == [{"country": "US", "limit": 3}]
+
+        # Mixed continents and countries
+        loc4 = client._parse_locations(["Europe", "US", "Japan"])
+        assert loc4 == [
+            {"continent": "EU", "limit": 3},
+            {"country": "US", "limit": 3},
+            {"country": "JP", "limit": 3},
+        ]
 
     @pytest.mark.asyncio
     async def test_default_locations(self, client):
@@ -314,3 +379,75 @@ class TestGlobalpingClient:
         assert probe.city == "Berlin"
         assert probe.asn == 3320
         assert probe.avg_latency == 15
+
+    @pytest.mark.asyncio
+    async def test_no_probes_available_error(self, client):
+        """Test that 422 response for no probes raises a helpful ValueError."""
+        error_response = {
+            "error": {
+                "type": "validation_error",
+                "message": "No suitable probes found matching the provided criteria",
+            }
+        }
+
+        with aioresponses() as m:
+            m.post(
+                "https://api.globalping.io/v1/measurements",
+                payload=error_response,
+                status=422,
+            )
+
+            async with client:
+                with pytest.raises(ValueError) as exc_info:
+                    await client.ping("8.8.8.8", locations=["US"])
+
+                # Should have a helpful error message
+                assert "No probes available" in str(exc_info.value)
+                assert "US" in str(exc_info.value)
+                assert "Try a different region" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_generic_422_error(self, client):
+        """Test that other 422 errors are also handled."""
+        error_response = {
+            "error": {
+                "type": "validation_error",
+                "message": "Invalid target specified",
+            }
+        }
+
+        with aioresponses() as m:
+            m.post(
+                "https://api.globalping.io/v1/measurements",
+                payload=error_response,
+                status=422,
+            )
+
+            async with client:
+                with pytest.raises(ValueError) as exc_info:
+                    await client.ping("invalid-target")
+
+                assert "Invalid target specified" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_400_bad_request_error(self, client):
+        """Test that 400 errors are handled with the error message."""
+        error_response = {
+            "error": {
+                "type": "bad_request",
+                "message": "Missing required field: target",
+            }
+        }
+
+        with aioresponses() as m:
+            m.post(
+                "https://api.globalping.io/v1/measurements",
+                payload=error_response,
+                status=400,
+            )
+
+            async with client:
+                with pytest.raises(ValueError) as exc_info:
+                    await client.ping("")
+
+                assert "Missing required field" in str(exc_info.value)

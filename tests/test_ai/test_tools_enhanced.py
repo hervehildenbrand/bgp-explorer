@@ -396,6 +396,26 @@ class TestPingFromGlobal:
         assert "Tokyo" in result
         assert "25.0% loss" in result
 
+    @pytest.mark.asyncio
+    async def test_ping_no_probes_available(self, mock_ripe_stat, mock_globalping):
+        """Test ping when no probes are available in requested location."""
+        mock_globalping.ping = AsyncMock(
+            side_effect=ValueError(
+                "No probes available in requested location(s): US. "
+                "Try a different region like 'Europe', 'Asia', or specific countries like 'DE', 'GB', 'JP'."
+            )
+        )
+        tools = BGPTools(ripe_stat=mock_ripe_stat, globalping=mock_globalping)
+
+        result = await tools.ping_from_global("8.8.8.8", locations=["US"])
+
+        # Should include error message and tell AI to ask user for alternatives
+        assert "PROBE AVAILABILITY ERROR" in result
+        assert "No probes available" in result
+        assert "US" in result
+        assert "MUST ask the user" in result
+        assert "Suggest alternatives" in result
+
 
 class TestTracerouteFromGlobal:
     """Tests for traceroute_from_global tool."""
@@ -491,3 +511,23 @@ class TestTracerouteFromGlobal:
 
         assert "Berlin" in result
         assert "2. *" in result  # Shows missing hop
+
+    @pytest.mark.asyncio
+    async def test_traceroute_no_probes_available(self, mock_ripe_stat, mock_globalping):
+        """Test traceroute when no probes are available in requested location."""
+        mock_globalping.traceroute = AsyncMock(
+            side_effect=ValueError(
+                "No probes available in requested location(s): US. "
+                "Try a different region like 'Europe', 'Asia', or specific countries like 'DE', 'GB', 'JP'."
+            )
+        )
+        tools = BGPTools(ripe_stat=mock_ripe_stat, globalping=mock_globalping)
+
+        result = await tools.traceroute_from_global("8.8.8.8", locations=["US"])
+
+        # Should include error message and tell AI to ask user for alternatives
+        assert "PROBE AVAILABILITY ERROR" in result
+        assert "No probes available" in result
+        assert "US" in result
+        assert "MUST ask the user" in result
+        assert "Suggest alternatives" in result

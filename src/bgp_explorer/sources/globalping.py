@@ -167,7 +167,7 @@ class GlobalpingClient(DataSource):
             locations: List of location specs. Can be dicts with keys like
                 'country', 'continent', 'asn', or simple strings like
                 'EU', 'US', 'Europe', 'Asia' which will be converted to
-                continent/region filters.
+                country or continent filters as appropriate.
             limit: Number of probes per location when using defaults.
 
         Returns:
@@ -176,19 +176,38 @@ class GlobalpingClient(DataSource):
         if not locations:
             return self._default_locations(limit)
 
+        # Map common country names/aliases to ISO country codes
+        # These take priority over continent matching
+        country_map = {
+            "us": "US",
+            "usa": "US",
+            "united states": "US",
+            "uk": "GB",
+            "united kingdom": "GB",
+            "britain": "GB",
+            "germany": "DE",
+            "france": "FR",
+            "japan": "JP",
+            "australia": "AU",
+            "canada": "CA",
+            "brazil": "BR",
+            "india": "IN",
+            "china": "CN",
+            "singapore": "SG",
+            "netherlands": "NL",
+            "holland": "NL",
+        }
+
         # Map common region names to continent codes
         region_map = {
             "europe": "EU",
             "eu": "EU",
             "north america": "NA",
             "na": "NA",
-            "us": "NA",
-            "usa": "NA",
             "asia": "AS",
             "as": "AS",
             "oceania": "OC",
             "oc": "OC",
-            "australia": "OC",
             "south america": "SA",
             "sa": "SA",
             "africa": "AF",
@@ -200,10 +219,15 @@ class GlobalpingClient(DataSource):
             if isinstance(loc, str):
                 # Convert string to location dict
                 loc_lower = loc.lower().strip()
-                if loc_lower in region_map:
+
+                # First check for country names/aliases
+                if loc_lower in country_map:
+                    loc = {"country": country_map[loc_lower], "limit": limit}
+                # Then check for continent/region names
+                elif loc_lower in region_map:
                     loc = {"continent": region_map[loc_lower], "limit": limit}
                 elif len(loc) == 2:
-                    # Assume 2-letter code is a country code
+                    # Assume 2-letter code is a country code (ISO 3166-1 alpha-2)
                     loc = {"country": loc.upper(), "limit": limit}
                 else:
                     # Try as continent code or country name
@@ -271,6 +295,29 @@ class GlobalpingClient(DataSource):
             f"{self.BASE_URL}/measurements",
             json=payload,
         ) as response:
+            if response.status == 422:
+                # Validation error - usually means no probes available in requested locations
+                error_data = await response.json()
+                error_msg = error_data.get("error", {}).get("message", "")
+                error_type = error_data.get("error", {}).get("type", "")
+
+                # Check if it's a probe availability issue
+                if "no suitable probes" in error_msg.lower() or "probes" in error_msg.lower():
+                    requested_locs = ", ".join(
+                        str(loc.get("country") or loc.get("continent"))
+                        for loc in payload.get("locations", [])
+                    )
+                    raise ValueError(
+                        f"No probes available in requested location(s): {requested_locs}. "
+                        f"Try a different region like 'Europe', 'Asia', or specific countries like 'DE', 'GB', 'JP'."
+                    )
+                raise ValueError(f"Globalping API error: {error_msg or error_type}")
+
+            if response.status == 400:
+                error_data = await response.json()
+                error_msg = error_data.get("error", {}).get("message", "Bad request")
+                raise ValueError(f"Globalping API error: {error_msg}")
+
             response.raise_for_status()
             data = await response.json()
             return data["id"]

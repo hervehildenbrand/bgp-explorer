@@ -66,6 +66,16 @@ def cli():
     is_flag=True,
     help="Force refresh of PeeringDB data from CAIDA",
 )
+@click.option(
+    "--oauth",
+    is_flag=True,
+    help="Use OAuth authentication for Gemini (Google login instead of API key)",
+)
+@click.option(
+    "--client-secret",
+    type=click.Path(exists=True),
+    help="Path to OAuth client_secret.json (default: ./client_secret.json or ~/.config/bgp-explorer/client_secret.json)",
+)
 def chat(
     backend: str,
     model: str,
@@ -75,6 +85,8 @@ def chat(
     output_format: str,
     save_path: Optional[str],
     refresh_peeringdb: bool,
+    oauth: bool,
+    client_secret: Optional[str],
 ):
     """Start an interactive chat session."""
     # Load environment variables from .env file
@@ -91,6 +103,8 @@ def chat(
         "output_format": OutputFormat(output_format),
         "save_path": save_path,
         "refresh_peeringdb": refresh_peeringdb,
+        "use_oauth": oauth,
+        "oauth_client_secret": client_secret,
     }
 
     # Handle Claude model (only relevant for Claude backend)
@@ -103,6 +117,11 @@ def chat(
             settings_kwargs["gemini_api_key"] = api_key
         else:
             settings_kwargs["anthropic_api_key"] = api_key
+
+    # Validate OAuth is only used with Gemini
+    if oauth and backend != "gemini":
+        click.echo("Error: --oauth flag is only supported with --backend=gemini", err=True)
+        sys.exit(1)
 
     try:
         settings = load_settings(**settings_kwargs)

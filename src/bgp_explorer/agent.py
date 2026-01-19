@@ -146,11 +146,25 @@ class BGPExplorerAgent:
             ValueError: If backend type is not supported.
         """
         if self._settings.ai_backend == AIBackendType.GEMINI:
-            return GeminiBackend(
-                api_key=self._settings.get_api_key(),
-                model=self._settings.gemini_model,
-                system_prompt=self._settings.system_prompt,
-            )
+            if self._settings.use_oauth:
+                # Use OAuth authentication
+                from bgp_explorer.ai.oauth import get_oauth_credentials
+
+                credentials = get_oauth_credentials(
+                    client_secret_path=self._settings.oauth_client_secret
+                )
+                return GeminiBackend(
+                    credentials=credentials,
+                    model=self._settings.gemini_model,
+                    system_prompt=self._settings.system_prompt,
+                )
+            else:
+                # Use API key authentication
+                return GeminiBackend(
+                    api_key=self._settings.get_api_key(),
+                    model=self._settings.gemini_model,
+                    system_prompt=self._settings.system_prompt,
+                )
         elif self._settings.ai_backend == AIBackendType.CLAUDE:
             return ClaudeBackend(
                 api_key=self._settings.get_api_key(),

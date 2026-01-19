@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional, get_type_hints
 
 import google.generativeai as genai
 from google.generativeai.types import FunctionDeclaration, Tool
+from google.oauth2.credentials import Credentials
 
 from bgp_explorer.ai.base import (
     AIBackend,
@@ -26,11 +27,13 @@ class GeminiBackend(AIBackend):
 
     Uses the google-generativeai SDK to interact with Gemini models.
     Supports tool calling and maintains conversation history.
+    Supports both API key and OAuth authentication.
     """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
+        credentials: Optional[Credentials] = None,
         model: str = "gemini-1.5-flash",
         system_prompt: Optional[str] = None,
         max_iterations: int = 10,
@@ -39,20 +42,27 @@ class GeminiBackend(AIBackend):
 
         Args:
             api_key: Gemini API key. Falls back to GEMINI_API_KEY env var.
+            credentials: OAuth credentials (alternative to api_key).
             model: Model name to use.
             system_prompt: System prompt for the conversation.
             max_iterations: Maximum tool execution iterations.
 
         Raises:
-            ValueError: If no API key is provided or found.
+            ValueError: If neither API key nor OAuth credentials are provided.
         """
-        api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "GEMINI_API_KEY not found. Provide api_key or set GEMINI_API_KEY env var."
-            )
-
-        genai.configure(api_key=api_key)
+        if credentials:
+            # Use OAuth credentials
+            genai.configure(credentials=credentials)
+        else:
+            # Use API key
+            api_key = api_key or os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                raise ValueError(
+                    "No authentication provided. Either:\n"
+                    "  - Set GEMINI_API_KEY environment variable\n"
+                    "  - Use --oauth flag for Google login"
+                )
+            genai.configure(api_key=api_key)
 
         self._model_name = model
         self._system_prompt = system_prompt

@@ -15,6 +15,27 @@ class AIBackendType(str, Enum):
     CLAUDE = "claude"
 
 
+class ClaudeModel(str, Enum):
+    """Supported Claude model tiers.
+
+    Maps to actual model IDs used by the Anthropic API.
+    """
+
+    HAIKU = "haiku"
+    SONNET = "sonnet"
+    OPUS = "opus"
+
+    @property
+    def model_id(self) -> str:
+        """Get the actual model ID for the API."""
+        model_ids = {
+            ClaudeModel.HAIKU: "claude-3-5-haiku-20241022",
+            ClaudeModel.SONNET: "claude-sonnet-4-20250514",
+            ClaudeModel.OPUS: "claude-opus-4-20250514",
+        }
+        return model_ids[self]
+
+
 class OutputFormat(str, Enum):
     """Output format options."""
 
@@ -55,6 +76,18 @@ class Settings(BaseSettings):
     gemini_model: str = Field(
         default="gemini-1.5-flash",
         description="Gemini model name",
+    )
+    claude_model: ClaudeModel = Field(
+        default=ClaudeModel.SONNET,
+        description="Claude model tier (haiku, sonnet, opus)",
+    )
+    use_oauth: bool = Field(
+        default=False,
+        description="Use OAuth authentication for Gemini (Google login)",
+    )
+    oauth_client_secret: Optional[str] = Field(
+        default=None,
+        description="Path to OAuth client_secret.json file",
     )
 
     # bgp-radar Settings
@@ -125,23 +158,48 @@ When answering questions:
 3. Provide clear, actionable insights
 4. Highlight any anomalies or security concerns (RPKI invalid, multiple origins, etc.)
 
+**Handling Unclear Requests:**
+When the user's intent is unclear or you need more information, ASK clarifying questions before proceeding. Be conversational and helpful.
+
+Ask for clarification when:
+- The query is ambiguous (e.g., "check my network" - which network? which prefix?)
+- Required information is missing (e.g., "lookup this prefix" without specifying the prefix)
+- Location constraints can't be met (e.g., no probes available in requested region - ask if they want to try another location)
+- Multiple interpretations are possible (e.g., "is this route good?" - good for what purpose?)
+- The user seems to be troubleshooting but hasn't described the problem
+
+Do NOT ask for clarification when:
+- The request is clear and you have all required parameters
+- You can make reasonable inferences from context (e.g., "check 8.8.8.8" implies lookup_prefix)
+- The question is general and exploratory (e.g., "what's happening with AS15169?")
+
+When asking questions:
+- Be concise and specific about what you need
+- Offer options when helpful (e.g., "Did you mean AS15169 (Google) or AS13335 (Cloudflare)?")
+- Explain briefly why you're asking if it's not obvious
+
 Be concise but thorough. Use technical terminology appropriate for network operators.""",
         description="System prompt for AI assistant",
     )
 
-    def get_api_key(self) -> str:
+    def get_api_key(self) -> Optional[str]:
         """Get the API key for the configured backend.
 
         Returns:
-            API key string.
+            API key string, or None if using OAuth.
 
         Raises:
-            ValueError: If no API key is configured for the backend.
+            ValueError: If no API key is configured for the backend (and not using OAuth).
         """
         if self.ai_backend == AIBackendType.GEMINI:
+            if self.use_oauth:
+                return None  # OAuth will be used instead
             if not self.gemini_api_key:
                 raise ValueError(
-                    "GEMINI_API_KEY not set. Please set the environment variable or provide --api-key."
+                    "GEMINI_API_KEY not set. Either:\n"
+                    "  - Set the environment variable\n"
+                    "  - Provide --api-key option\n"
+                    "  - Use --oauth flag for Google login"
                 )
             return self.gemini_api_key
         else:
