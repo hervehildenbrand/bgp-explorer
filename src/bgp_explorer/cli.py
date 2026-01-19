@@ -562,25 +562,29 @@ async def run_chat(settings, output: OutputFormatter) -> None:
                 output.display_user_input(user_input)
 
                 try:
-                    with output.thinking_status("Thinking...") as status:
-                        # Event handler to update status during processing
-                        def handle_event(event: ChatEvent) -> None:
-                            if event.type == "tool_start":
-                                message = event.data.get("message", "Running tool...")
-                                output.update_status(status, message)
-                            elif event.type == "tool_end":
-                                output.update_status(status, "Thinking...")
-                            elif event.type == "thinking_summary":
-                                # Display thinking summary - stop spinner briefly
-                                summary = event.data.get("summary", "")
-                                iteration = event.data.get("iteration", 1)
-                                status.stop()
-                                output.display_thinking_summary(summary, iteration)
-                                status.start()
+                    # Start processing - spinner above input box at bottom
+                    output.start_processing_with_input_box()
 
-                        response = await agent.chat(user_input, on_event=handle_event)
+                    # Event handler to update status during processing
+                    def handle_event(event: ChatEvent) -> None:
+                        if event.type == "tool_start":
+                            message = event.data.get("message", "Running tool...")
+                            output.display_status_above_input(message)
+                        elif event.type == "tool_end":
+                            output.display_status_above_input("Thinking...")
+                        elif event.type == "thinking_summary":
+                            # Display thinking summary above input box
+                            summary = event.data.get("summary", "")
+                            iteration = event.data.get("iteration", 1)
+                            output.display_thinking_summary(summary, iteration)
+
+                    response = await agent.chat(user_input, on_event=handle_event)
+
+                    # Clear processing area before showing response
+                    output.finish_processing()
                     output.display_response(response)
                 except Exception as e:
+                    output.finish_processing()
                     output.display_error(f"AI error: {e}")
 
             except EOFError:

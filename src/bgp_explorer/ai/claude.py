@@ -274,7 +274,8 @@ class ClaudeBackend(AIBackend):
         """Extract a concise summary from extended thinking text.
 
         Looks for key phrases that indicate the model's intent and extracts
-        a human-readable summary for display.
+        a human-readable summary for display. Handles multi-line thoughts by
+        continuing to read until a complete sentence is formed.
 
         Args:
             thinking_text: The full extended thinking text.
@@ -306,15 +307,15 @@ class ClaudeBackend(AIBackend):
 
         lines = thinking_text.split("\n")
 
-        # Find the first line containing a key phrase
-        for line in lines:
+        # Find the first line containing a key phrase and build complete thought
+        for i, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
 
             for phrase in key_phrases:
                 if phrase.lower() in line.lower():
-                    # Clean up the line
+                    # Start building summary from this line
                     summary = line
 
                     # Remove leading phrases like "Okay, " or "Alright, "
@@ -322,9 +323,32 @@ class ClaudeBackend(AIBackend):
                         if summary.startswith(prefix):
                             summary = summary[len(prefix):]
 
-                    # Truncate if too long
+                    # If line ends mid-sentence, continue reading subsequent lines
+                    # A sentence is complete if it ends with terminal punctuation
+                    # Note: colon excluded because it often introduces lists
+                    terminal_punctuation = (".", "!", "?", ")")
+                    j = i + 1
+                    while (
+                        not summary.rstrip().endswith(terminal_punctuation)
+                        and j < len(lines)
+                        and len(summary) < max_length
+                    ):
+                        next_line = lines[j].strip()
+                        j += 1
+                        if not next_line:
+                            # Empty line = paragraph break, stop here
+                            break
+                        # Append with space
+                        summary = summary + " " + next_line
+
+                    # Truncate if too long, trying to break at word boundary
                     if len(summary) > max_length:
-                        summary = summary[: max_length - 3] + "..."
+                        truncated = summary[: max_length - 3]
+                        # Try to break at last space
+                        last_space = truncated.rfind(" ")
+                        if last_space > max_length // 2:
+                            truncated = truncated[:last_space]
+                        summary = truncated + "..."
 
                     return summary
 

@@ -203,16 +203,87 @@ AI-powered assistant for BGP routing investigation.
         """
         self.console.print(f"[dim]{info}[/dim]")
 
+    def _print_above_input_box(self, print_func: callable) -> None:
+        """Print content above the input box, keeping input box at bottom.
+
+        Args:
+            print_func: A callable that does the actual printing.
+        """
+        # Move cursor to beginning of line and clear it
+        print("\r\033[K", end="", flush=True)
+
+        # Move up past the input box (3 lines: top border, input line, bottom border)
+        print("\033[3A", end="", flush=True)
+        # Clear from cursor to end of screen
+        print("\033[J", end="", flush=True)
+
+        # Do the actual printing
+        print_func()
+
+        # Redraw the input box at bottom
+        self.display_input_box()
+        print("> ", end="", flush=True)
+
+    def display_status_above_input(self, message: str) -> None:
+        """Display a status message above the input box.
+
+        Args:
+            message: Status message to display.
+        """
+        def do_print():
+            # Print status with cyan color
+            self.console.print(f"[bold cyan]⠋ {message}[/bold cyan]")
+
+        self._print_above_input_box(do_print)
+
     def display_thinking_summary(self, summary: str, iteration: int) -> None:
         """Display a thinking summary from Claude's extended thinking.
 
         Shows what Claude is thinking about during multi-step investigations.
+        Prints above the input box which stays at the bottom.
 
         Args:
             summary: The extracted thinking summary.
             iteration: The current iteration number.
         """
-        self.console.print(f"[dim italic]Step {iteration}: {summary}[/dim italic]")
+        def do_print():
+            self.console.print(f"[dim italic]Step {iteration}: {summary}[/dim italic]")
+            # Also show the spinner below the step
+            self.console.print("[bold cyan]⠋ Thinking...[/bold cyan]")
+
+        self._print_above_input_box(do_print)
+
+    def display_content_above_input(self, content: str, style: str = "") -> None:
+        """Display any content above the input box.
+
+        Args:
+            content: Content to display.
+            style: Optional Rich style.
+        """
+        def do_print():
+            if style:
+                self.console.print(f"[{style}]{content}[/{style}]")
+            else:
+                self.console.print(content)
+
+        self._print_above_input_box(do_print)
+
+    def start_processing_with_input_box(self) -> None:
+        """Start processing mode - show input box with initial spinner above it."""
+        # Print initial spinner
+        self.console.print("[bold cyan]⠋ Thinking...[/bold cyan]")
+        # Draw input box below
+        self.display_input_box()
+        print("> ", end="", flush=True)
+
+    def finish_processing(self) -> None:
+        """Finish processing - clear the input box area for response display."""
+        # Move cursor to beginning of line and clear it
+        print("\r\033[K", end="", flush=True)
+        # Move up past the input box (3 lines)
+        print("\033[3A", end="", flush=True)
+        # Clear from cursor to end of screen
+        print("\033[J", end="", flush=True)
 
     def display_bgp_event(self, event: BGPEvent, monitoring_status: str | None = None) -> None:
         """Display a real-time BGP anomaly event.
