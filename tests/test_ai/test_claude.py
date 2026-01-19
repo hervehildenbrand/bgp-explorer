@@ -137,4 +137,4 @@ class TestClaudeBackend:
     def test_max_iterations_default(self, mock_anthropic):
         """Test default max iterations."""
         backend = ClaudeBackend(api_key="test-key")
-        assert backend._max_iterations == 10
+        assert backend._max_iterations == 20

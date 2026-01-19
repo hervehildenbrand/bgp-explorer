@@ -34,7 +34,7 @@ class ClaudeBackend(AIBackend):
         api_key: str | None = None,
         model: str = "claude-sonnet-4-5-20250929",
         system_prompt: str | None = None,
-        max_iterations: int = 10,
+        max_iterations: int = 20,
         max_tokens: int = 16000,
         thinking_budget: int = 10000,
     ):
@@ -214,6 +214,14 @@ class ClaudeBackend(AIBackend):
                         thinking=block.thinking,
                         signature=getattr(block, 'signature', None),
                     ))
+                    # Emit thinking summary for display
+                    if on_event and block.thinking:
+                        summary = self._extract_thinking_summary(block.thinking)
+                        if summary:
+                            on_event(ChatEvent(
+                                type="thinking_summary",
+                                data={"summary": summary, "iteration": iterations},
+                            ))
                 elif block.type == "text":
                     text_parts.append(block.text)
                 elif block.type == "tool_use":
@@ -261,6 +269,74 @@ class ClaudeBackend(AIBackend):
                 return response_text
 
         return "Max iterations reached without final response."
+
+    def _extract_thinking_summary(self, thinking_text: str, max_length: int = 200) -> str | None:
+        """Extract a concise summary from extended thinking text.
+
+        Looks for key phrases that indicate the model's intent and extracts
+        a human-readable summary for display.
+
+        Args:
+            thinking_text: The full extended thinking text.
+            max_length: Maximum length of the summary.
+
+        Returns:
+            A concise summary string, or None if no meaningful summary found.
+        """
+        if not thinking_text:
+            return None
+
+        # Key phrases that indicate intent (prioritized)
+        key_phrases = [
+            "I need to",
+            "I should",
+            "Let me",
+            "First,",
+            "Next,",
+            "Now I",
+            "I'll",
+            "I will",
+            "To answer",
+            "To investigate",
+            "To find",
+            "Looking at",
+            "Checking",
+            "Analyzing",
+        ]
+
+        lines = thinking_text.split("\n")
+
+        # Find the first line containing a key phrase
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            for phrase in key_phrases:
+                if phrase.lower() in line.lower():
+                    # Clean up the line
+                    summary = line
+
+                    # Remove leading phrases like "Okay, " or "Alright, "
+                    for prefix in ["Okay, ", "Alright, ", "Ok, ", "So, ", "Well, "]:
+                        if summary.startswith(prefix):
+                            summary = summary[len(prefix):]
+
+                    # Truncate if too long
+                    if len(summary) > max_length:
+                        summary = summary[: max_length - 3] + "..."
+
+                    return summary
+
+        # Fallback: use the first non-empty line if it's meaningful
+        for line in lines[:5]:
+            line = line.strip()
+            if line and len(line) > 20:
+                if len(line) > max_length:
+                    line = line[: max_length - 3] + "..."
+                return line
+
+        return None
 
     async def _execute_tools(
         self,

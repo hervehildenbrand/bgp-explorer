@@ -13,7 +13,7 @@ import aiohttp
 from rich.console import Console
 from rich.progress import BarColumn, DownloadColumn, Progress, SpinnerColumn, TextColumn
 
-from bgp_explorer.models.ixp import IXP, IXPPresence, Network
+from bgp_explorer.models.ixp import IXP, IXPPresence, Network, NetworkContact
 from bgp_explorer.sources.base import DataSource
 
 # Default cache directory
@@ -61,6 +61,7 @@ class PeeringDBClient(DataSource):
         self._asn_to_ixps: dict[int, list[IXPPresence]] = {}
         self._ixp_to_asns: dict[int, list[Network]] = {}
         self._asn_to_net: dict[int, Network] = {}
+        self._asn_to_contacts: dict[int, list[NetworkContact]] = {}
 
     @property
     def cache_file(self) -> Path:
@@ -323,9 +324,38 @@ class PeeringDBClient(DataSource):
                 self._ixp_by_id[ix_id] = updated_ixp
                 self._ixp_by_name[old_ixp.name.lower()] = updated_ixp
 
+        # Build POC (point of contact) index for networks
+        self._asn_to_contacts.clear()
+
+        for poc_data in data.get("poc", {}).get("data", []):
+            net_id = poc_data.get("net_id")
+            if net_id is None or net_id not in net_id_to_asn:
+                continue
+
+            # Only include visible contacts
+            if not poc_data.get("visible", "Public") == "Public":
+                continue
+
+            asn = net_id_to_asn[net_id]
+            contact = NetworkContact(
+                role=poc_data.get("role", ""),
+                name=poc_data.get("name", ""),
+                email=poc_data.get("email", ""),
+                phone=poc_data.get("phone", ""),
+                url=poc_data.get("url", ""),
+                visible=True,
+            )
+
+            if asn not in self._asn_to_contacts:
+                self._asn_to_contacts[asn] = []
+            self._asn_to_contacts[asn].append(contact)
+
         count_ixps = len(self._ixp_by_id)
         count_networks = len(self._asn_to_net)
-        self._console.print(f"[green]PeeringDB data loaded ({count_ixps} IXPs, {count_networks} networks)[/green]")
+        count_contacts = sum(len(c) for c in self._asn_to_contacts.values())
+        self._console.print(
+            f"[green]PeeringDB data loaded ({count_ixps} IXPs, {count_networks} networks, {count_contacts} contacts)[/green]"
+        )
 
     def _ensure_loaded(self) -> None:
         """Ensure data is loaded before queries."""
@@ -412,6 +442,21 @@ class PeeringDBClient(DataSource):
         """
         self._ensure_loaded()
         return self._asn_to_net.get(asn)
+
+    def get_network_contacts(self, asn: int) -> list[NetworkContact]:
+        """Get contact information for a network.
+
+        Returns publicly visible points of contact (NOC, Abuse, Technical, etc.)
+        for the specified ASN from PeeringDB.
+
+        Args:
+            asn: Autonomous System Number.
+
+        Returns:
+            List of NetworkContact records for this ASN (may be empty).
+        """
+        self._ensure_loaded()
+        return self._asn_to_contacts.get(asn, [])
 
     def _resolve_ixp_id(self, ixp_id_or_name: int | str) -> int | None:
         """Resolve an IXP identifier to an IXP ID.

@@ -38,6 +38,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "get_as_downstreams": "Finding downstreams for AS{asn}...",
     "check_as_relationship": "Checking relationship between AS{asn1} and AS{asn2}...",
     "get_as_connectivity_summary": "Getting connectivity summary for AS{asn}...",
+    "get_network_contacts": "Looking up contacts for AS{asn}...",
     "start_monitoring": "Starting BGP anomaly monitoring...",
     "stop_monitoring": "Stopping BGP anomaly monitoring...",
 }
@@ -131,6 +132,7 @@ class BGPTools:
                 self.get_ixps_for_asn,
                 self.get_networks_at_ixp,
                 self.get_ixp_details,
+                self.get_network_contacts,
             ])
         # Add Monocle tools if available
         if self._monocle:
@@ -1004,6 +1006,96 @@ class BGPTools:
 
         except Exception as e:
             return f"Error getting details for IXP '{ixp}': {str(e)}"
+
+    async def get_network_contacts(self, asn: int) -> str:
+        """Get contact information for a network from PeeringDB.
+
+        Returns publicly visible points of contact (NOC, Abuse, Technical, etc.)
+        for incident coordination and peering requests.
+
+        Use this tool when:
+        - The user needs to report a security incident to a network
+        - The user wants to coordinate with a network's NOC
+        - The user is investigating an issue and needs to contact the network operator
+
+        Args:
+            asn: Autonomous System Number (e.g., 15169 for Google).
+
+        Returns:
+            Contact information including roles, emails, and phone numbers.
+        """
+        if self._peeringdb is None:
+            return "PeeringDB is not configured. Contact information is not available."
+
+        try:
+            # Get network info first
+            network = self._peeringdb.get_network_info(asn)
+            contacts = self._peeringdb.get_network_contacts(asn)
+
+            if not network:
+                return f"AS{asn} not found in PeeringDB."
+
+            summary = [
+                f"**AS{asn} Contact Information**",
+                f"**Network:** {network.name}",
+                "",
+            ]
+
+            if not contacts:
+                summary.append("No public contact information available in PeeringDB.")
+                if network.website:
+                    summary.append(f"\n**Website:** {network.website}")
+                return "\n".join(summary)
+
+            summary.append(f"**Contacts ({len(contacts)}):**")
+            summary.append("")
+
+            # Group contacts by role
+            by_role: dict[str, list] = {}
+            for contact in contacts:
+                role = contact.role or "Other"
+                if role not in by_role:
+                    by_role[role] = []
+                by_role[role].append(contact)
+
+            # Display contacts grouped by role, with priority order
+            priority_roles = ["NOC", "Abuse", "Technical", "Policy", "Sales"]
+            for role in priority_roles:
+                if role in by_role:
+                    summary.append(f"**{role}:**")
+                    for contact in by_role[role]:
+                        if contact.name:
+                            summary.append(f"  - Name: {contact.name}")
+                        if contact.email:
+                            summary.append(f"  - Email: {contact.email}")
+                        if contact.phone:
+                            summary.append(f"  - Phone: {contact.phone}")
+                        if contact.url:
+                            summary.append(f"  - URL: {contact.url}")
+                        summary.append("")
+                    del by_role[role]
+
+            # Display remaining roles
+            for role, role_contacts in sorted(by_role.items()):
+                summary.append(f"**{role}:**")
+                for contact in role_contacts:
+                    if contact.name:
+                        summary.append(f"  - Name: {contact.name}")
+                    if contact.email:
+                        summary.append(f"  - Email: {contact.email}")
+                    if contact.phone:
+                        summary.append(f"  - Phone: {contact.phone}")
+                    if contact.url:
+                        summary.append(f"  - URL: {contact.url}")
+                    summary.append("")
+
+            if network.website:
+                summary.append(f"**Website:** {network.website}")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting contacts for AS{asn}: {str(e)}"
 
     async def get_as_peers(self, asn: int) -> str:
         """Get all peers for an Autonomous System.

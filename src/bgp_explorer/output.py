@@ -203,6 +203,17 @@ AI-powered assistant for BGP routing investigation.
         """
         self.console.print(f"[dim]{info}[/dim]")
 
+    def display_thinking_summary(self, summary: str, iteration: int) -> None:
+        """Display a thinking summary from Claude's extended thinking.
+
+        Shows what Claude is thinking about during multi-step investigations.
+
+        Args:
+            summary: The extracted thinking summary.
+            iteration: The current iteration number.
+        """
+        self.console.print(f"[dim italic]Step {iteration}: {summary}[/dim italic]")
+
     def display_bgp_event(self, event: BGPEvent, monitoring_status: str | None = None) -> None:
         """Display a real-time BGP anomaly event.
 

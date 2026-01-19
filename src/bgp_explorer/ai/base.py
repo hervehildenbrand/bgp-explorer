@@ -74,7 +74,7 @@ class Message:
 class ChatEvent:
     """Event emitted during chat processing for live UI updates."""
 
-    type: Literal["thinking", "tool_start", "tool_end", "text_delta", "complete", "error"]
+    type: Literal["thinking", "thinking_summary", "tool_start", "tool_end", "text_delta", "complete", "error"]
     data: dict[str, Any] = field(default_factory=dict)
 
 

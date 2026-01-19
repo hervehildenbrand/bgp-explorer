@@ -1,6 +1,50 @@
 """IXP (Internet Exchange Point) data models for PeeringDB integration."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class NetworkContact:
+    """Contact information for a network from PeeringDB.
+
+    Attributes:
+        role: Contact role (e.g., "Abuse", "NOC", "Policy", "Technical", "Sales")
+        name: Contact name (may be empty)
+        email: Contact email address
+        phone: Contact phone number (may be empty)
+        url: Contact URL (may be empty)
+        visible: Whether contact is publicly visible
+    """
+
+    role: str
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    url: str = ""
+    visible: bool = True
+
+    def to_dict(self) -> dict:
+        """Convert NetworkContact to dictionary for JSON serialization."""
+        return {
+            "role": self.role,
+            "name": self.name,
+            "email": self.email,
+            "phone": self.phone,
+            "url": self.url,
+            "visible": self.visible,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NetworkContact":
+        """Create a NetworkContact from a dictionary."""
+        return cls(
+            role=data.get("role", ""),
+            name=data.get("name", ""),
+            email=data.get("email", ""),
+            phone=data.get("phone", ""),
+            url=data.get("url", ""),
+            visible=data.get("visible", True),
+        )
 
 
 @dataclass
@@ -56,12 +100,14 @@ class Network:
         name: Network name (e.g., "Google LLC", "Cloudflare, Inc.")
         info_type: Network type (e.g., "NSP", "Content", "Enterprise")
         website: Network website URL
+        contacts: List of network contacts (NOC, Abuse, etc.)
     """
 
     asn: int
     name: str
     info_type: str | None = None
     website: str | None = None
+    contacts: list["NetworkContact"] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert Network to dictionary for JSON serialization."""
@@ -70,6 +116,7 @@ class Network:
             "name": self.name,
             "info_type": self.info_type,
             "website": self.website,
+            "contacts": [c.to_dict() for c in self.contacts],
         }
 
     @classmethod
@@ -80,6 +127,7 @@ class Network:
             name=data["name"],
             info_type=data.get("info_type"),
             website=data.get("website"),
+            contacts=[NetworkContact.from_dict(c) for c in data.get("contacts", [])],
         )
 
 

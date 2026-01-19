@@ -1,6 +1,8 @@
 """CLI entrypoint for BGP Explorer."""
 
 import asyncio
+import shutil
+import subprocess
 import sys
 
 import click
@@ -132,6 +134,118 @@ from bgp_explorer.output import OutputFormatter
 def cli():
     """BGP Explorer - AI-powered BGP routing investigation tool."""
     pass
+
+
+@cli.command("install-deps")
+def install_deps():
+    """Install required external dependencies (bgp-radar, monocle).
+
+    This command installs the external tools that BGP Explorer uses:
+
+    - bgp-radar: Real-time BGP anomaly detection (requires Go)
+    - monocle: AS relationship data from BGPKIT (requires Rust/Cargo)
+
+    Both tools will be installed to your Go/Cargo bin directories,
+    which should be in your PATH.
+    """
+    click.echo("Installing BGP Explorer dependencies...\n")
+
+    success_count = 0
+    total_deps = 2
+
+    # Install bgp-radar (Go)
+    click.echo("=" * 50)
+    click.echo("Installing bgp-radar (Go)...")
+    click.echo("=" * 50)
+
+    if shutil.which("go"):
+        try:
+            result = subprocess.run(
+                ["go", "install", "github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if result.returncode == 0:
+                # Verify installation
+                if shutil.which("bgp-radar"):
+                    click.echo(click.style("✓ bgp-radar installed successfully", fg="green"))
+                    success_count += 1
+                else:
+                    click.echo(click.style("✓ bgp-radar built successfully", fg="green"))
+                    click.echo(click.style("  Note: Ensure $GOPATH/bin is in your PATH", fg="yellow"))
+                    success_count += 1
+            else:
+                click.echo(click.style(f"✗ Failed to install bgp-radar", fg="red"))
+                if result.stderr:
+                    click.echo(f"  Error: {result.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            click.echo(click.style("✗ Installation timed out", fg="red"))
+        except Exception as e:
+            click.echo(click.style(f"✗ Error: {e}", fg="red"))
+    else:
+        click.echo(click.style("✗ Go is not installed", fg="red"))
+        click.echo("  Install Go from: https://go.dev/doc/install")
+
+    click.echo()
+
+    # Install monocle (Rust/Cargo)
+    click.echo("=" * 50)
+    click.echo("Installing monocle (Rust/Cargo)...")
+    click.echo("=" * 50)
+
+    if shutil.which("cargo"):
+        try:
+            result = subprocess.run(
+                ["cargo", "install", "monocle"],
+                capture_output=True,
+                text=True,
+                timeout=600,  # Rust builds can take longer
+            )
+            if result.returncode == 0:
+                # Verify installation
+                if shutil.which("monocle"):
+                    click.echo(click.style("✓ monocle installed successfully", fg="green"))
+                    success_count += 1
+                else:
+                    click.echo(click.style("✓ monocle built successfully", fg="green"))
+                    click.echo(click.style("  Note: Ensure ~/.cargo/bin is in your PATH", fg="yellow"))
+                    success_count += 1
+            else:
+                click.echo(click.style(f"✗ Failed to install monocle", fg="red"))
+                if result.stderr:
+                    # Cargo outputs to stderr even on success, filter errors
+                    error_lines = [l for l in result.stderr.split('\n') if 'error' in l.lower()]
+                    if error_lines:
+                        click.echo(f"  Error: {error_lines[0]}")
+        except subprocess.TimeoutExpired:
+            click.echo(click.style("✗ Installation timed out", fg="red"))
+        except Exception as e:
+            click.echo(click.style(f"✗ Error: {e}", fg="red"))
+    else:
+        click.echo(click.style("✗ Rust/Cargo is not installed", fg="red"))
+        click.echo("  Install Rust from: https://rustup.rs/")
+
+    click.echo()
+
+    # Summary
+    click.echo("=" * 50)
+    click.echo("Summary")
+    click.echo("=" * 50)
+
+    if success_count == total_deps:
+        click.echo(click.style(f"✓ All {total_deps} dependencies installed successfully!", fg="green"))
+    elif success_count > 0:
+        click.echo(click.style(f"⚠ {success_count}/{total_deps} dependencies installed", fg="yellow"))
+        click.echo("  Some features may not be available.")
+    else:
+        click.echo(click.style(f"✗ No dependencies could be installed", fg="red"))
+        click.echo("  Please install Go and/or Rust first.")
+
+    click.echo()
+    click.echo("To verify installation, run:")
+    click.echo("  bgp-radar --help")
+    click.echo("  monocle --help")
 
 
 @cli.command()
@@ -277,6 +391,13 @@ async def run_chat(settings, output: OutputFormatter) -> None:
                                 output.update_status(status, message)
                             elif event.type == "tool_end":
                                 output.update_status(status, "Thinking...")
+                            elif event.type == "thinking_summary":
+                                # Display thinking summary - stop spinner briefly
+                                summary = event.data.get("summary", "")
+                                iteration = event.data.get("iteration", 1)
+                                status.stop()
+                                output.display_thinking_summary(summary, iteration)
+                                status.start()
 
                         response = await agent.chat(user_input, on_event=handle_event)
                     output.display_response(response)
