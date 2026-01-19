@@ -203,6 +203,27 @@ AI-powered assistant for BGP routing investigation.
         """
         self.console.print(f"[dim]{info}[/dim]")
 
+    def display_commands_help(self) -> None:
+        """Display available slash commands."""
+        from rich.table import Table
+
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("Command", style="bold")
+        table.add_column("Description", style="dim")
+
+        table.add_row("/monitor start [types]", "Start real-time BGP monitoring")
+        table.add_row("/monitor stop", "Stop monitoring")
+        table.add_row("/monitor status", "Check monitoring status")
+        table.add_row("/monitor filter [types]", "Change event filter")
+        table.add_row("/export [path]", "Export conversation to JSON")
+        table.add_row("/clear", "Clear conversation history")
+        table.add_row("/help", "Show full help message")
+        table.add_row("exit", "Exit the application")
+
+        self.console.print("\n[bold cyan]Available Commands:[/bold cyan]\n")
+        self.console.print(table)
+        self.console.print()
+
     def _print_above_input_box(self, print_func: callable) -> None:
         """Print content above the input box, keeping input box at bottom.
 

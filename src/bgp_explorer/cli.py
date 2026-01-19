@@ -551,11 +551,18 @@ async def run_chat(settings, output: OutputFormatter) -> None:
 
                 # Check for commands
                 if user_input.startswith("/"):
-                    command = user_input[1:]
+                    command = user_input[1:].strip()
+
+                    # Show available commands if just "/" or "/?" or "/help"
+                    if not command or command in ("?", "help"):
+                        output.display_commands_help()
+                        continue
+
                     if await agent.handle_command(command):
                         continue
                     else:
-                        output.display_error(f"Unknown command: {command}")
+                        output.display_error(f"Unknown command: /{command}")
+                        output.display_commands_help()
                         continue
 
                 # Process message
