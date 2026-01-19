@@ -47,10 +47,34 @@ class MonocleClient(DataSource):
         self._binary_path = (
             binary_path
             or os.environ.get("MONOCLE_PATH")
-            or shutil.which("monocle")
+            or self._find_binary()
         )
         self._timeout = timeout
         self._use_cache = use_cache
+
+    @staticmethod
+    def _find_binary() -> str | None:
+        """Find monocle binary in PATH or common locations.
+
+        Returns:
+            Path to monocle binary, or None if not found.
+        """
+        # Check PATH first
+        path_binary = shutil.which("monocle")
+        if path_binary:
+            return path_binary
+
+        # Check common Cargo install locations
+        home = os.path.expanduser("~")
+        candidates = [
+            os.path.join(home, ".cargo", "bin", "monocle"),
+        ]
+
+        for candidate in candidates:
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+
+        return None
 
     async def connect(self) -> None:
         """No-op for Monocle (one-shot CLI tool)."""

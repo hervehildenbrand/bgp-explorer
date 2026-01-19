@@ -51,7 +51,7 @@ class BgpRadarClient(DataSource):
             cache_ttl: TTL for event cache.
             max_recent_events: Maximum number of recent events to keep.
         """
-        self._binary_path = binary_path or os.environ.get("BGP_RADAR_PATH") or "bgp-radar"
+        self._binary_path = binary_path or os.environ.get("BGP_RADAR_PATH") or self._find_binary()
         self._collectors = collectors or ["rrc00"]
         self._max_retries = max_retries
         self._retry_delay = retry_delay
@@ -64,6 +64,33 @@ class BgpRadarClient(DataSource):
         self._running = False
         self._event_callback: EventCallback | None = None
         self._event_filter: set[EventType] = set()  # Empty = all events
+
+    @staticmethod
+    def _find_binary() -> str:
+        """Find bgp-radar binary in PATH or common locations.
+
+        Returns:
+            Path to bgp-radar binary, or "bgp-radar" if not found.
+        """
+        # Check PATH first
+        path_binary = shutil.which("bgp-radar")
+        if path_binary:
+            return path_binary
+
+        # Check common Go install locations
+        home = os.path.expanduser("~")
+        candidates = [
+            os.path.join(home, "go", "bin", "bgp-radar"),
+            os.path.join(home, ".local", "go", "bin", "bgp-radar"),
+            "/usr/local/go/bin/bgp-radar",
+        ]
+
+        for candidate in candidates:
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+
+        # Fallback - let it fail later with helpful error
+        return "bgp-radar"
 
     @property
     def is_running(self) -> bool:
