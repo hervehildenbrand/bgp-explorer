@@ -112,6 +112,13 @@ You have access to these tools:
 - get_networks_at_ixp(ixp) - List networks peering at an IXP
 - get_ixp_details(ixp) - Get details about an IXP (location, participants)
 
+**AS Relationship Data (from Monocle - observed BGP data):**
+- get_as_peers(asn) - Get all networks that peer with an AS
+- get_as_upstreams(asn) - Get upstream transit providers for an AS
+- get_as_downstreams(asn) - Get downstream customers of an AS
+- check_as_relationship(asn1, asn2) - Check the relationship between two ASes
+- get_as_connectivity_summary(asn) - Get counts of upstreams, peers, and downstreams
+
 When answering questions:
 1. Use the appropriate tools to gather data
 2. Analyze the results in the context of the user's question

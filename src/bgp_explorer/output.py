@@ -70,6 +70,12 @@ AI-powered assistant for BGP routing investigation.
 - What networks peer at DE-CIX Frankfurt?
 - Tell me about AMS-IX
 
+**AS Relationships** (from Monocle - observed BGP data)
+- How many peers does AS47957 have?
+- Who are the upstream providers for Google?
+- Is AS13335 a peer of AS3356?
+- Show downstream customers of Level3
+
 **Historical Analysis** (requires BGPStream)
 - What happened to 1.2.3.0/24 on January 15th?
 - Show routing history for AS64496 last week

@@ -13,6 +13,7 @@ from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.models.event import EventType
 from bgp_explorer.sources.bgp_radar import BgpRadarClient
 from bgp_explorer.sources.globalping import GlobalpingClient
+from bgp_explorer.sources.monocle import MonocleClient
 from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
 
@@ -31,6 +32,7 @@ class BGPTools:
         bgp_radar: Optional[BgpRadarClient] = None,
         globalping: Optional[GlobalpingClient] = None,
         peeringdb: Optional[PeeringDBClient] = None,
+        monocle: Optional[MonocleClient] = None,
     ):
         """Initialize tools with data source clients.
 
@@ -39,11 +41,13 @@ class BGPTools:
             bgp_radar: bgp-radar client for real-time anomalies.
             globalping: Globalping client for network probing.
             peeringdb: PeeringDB client for IXP/network info.
+            monocle: Monocle client for AS relationship data.
         """
         self._ripe_stat = ripe_stat
         self._bgp_radar = bgp_radar
         self._globalping = globalping
         self._peeringdb = peeringdb
+        self._monocle = monocle
         self._path_analyzer = PathAnalyzer()
         self._as_analyzer = ASAnalyzer()
 
@@ -75,6 +79,15 @@ class BGPTools:
                 self.get_ixps_for_asn,
                 self.get_networks_at_ixp,
                 self.get_ixp_details,
+            ])
+        # Add Monocle tools if available
+        if self._monocle:
+            tools.extend([
+                self.get_as_peers,
+                self.get_as_upstreams,
+                self.get_as_downstreams,
+                self.check_as_relationship,
+                self.get_as_connectivity_summary,
             ])
         return tools
 
@@ -843,3 +856,256 @@ class BGPTools:
 
         except Exception as e:
             return f"Error getting details for IXP '{ixp}': {str(e)}"
+
+    async def get_as_peers(self, asn: int) -> str:
+        """Get all peers for an Autonomous System.
+
+        Returns the list of networks that peer with this AS,
+        derived from observed BGP routing data across 1,700+ global peers.
+        Uses Monocle for accurate relationship data.
+
+        Args:
+            asn: Autonomous System Number (e.g., 15169 for Google).
+
+        Returns:
+            List of peer ASes with visibility information.
+        """
+        if self._monocle is None:
+            return "Monocle is not configured. AS relationship data is not available."
+
+        try:
+            peers = await self._monocle.get_as_peers(asn)
+
+            if not peers:
+                return f"No peer relationships found for AS{asn}."
+
+            summary = [
+                f"**AS{asn} Peers**",
+                "",
+                f"**Total peers:** {len(peers)}",
+                "",
+                "**Top peers (by visibility):**",
+            ]
+
+            # Sort by visibility and show top 20
+            sorted_peers = sorted(peers, key=lambda p: p.connected_pct, reverse=True)
+            for peer in sorted_peers[:20]:
+                name_str = f" ({peer.asn2_name})" if peer.asn2_name else ""
+                summary.append(
+                    f"  - AS{peer.asn2}{name_str}: {peer.connected_pct:.1f}% visibility"
+                )
+
+            if len(peers) > 20:
+                summary.append(f"  ... and {len(peers) - 20} more peers")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting peers for AS{asn}: {str(e)}"
+
+    async def get_as_upstreams(self, asn: int) -> str:
+        """Get upstream transit providers for an AS.
+
+        Returns the list of networks that provide transit to this AS,
+        derived from observed BGP routing data across 1,700+ global peers.
+        Uses Monocle for accurate relationship data.
+
+        Args:
+            asn: Autonomous System Number (e.g., 15169 for Google).
+
+        Returns:
+            List of upstream provider ASes with visibility information.
+        """
+        if self._monocle is None:
+            return "Monocle is not configured. AS relationship data is not available."
+
+        try:
+            upstreams = await self._monocle.get_as_upstreams(asn)
+
+            if not upstreams:
+                return f"No upstream providers found for AS{asn}. This AS may be a transit-free network (Tier 1)."
+
+            summary = [
+                f"**AS{asn} Upstream Providers**",
+                "",
+                f"**Total upstreams:** {len(upstreams)}",
+                "",
+            ]
+
+            # Sort by visibility
+            sorted_upstreams = sorted(upstreams, key=lambda u: u.connected_pct, reverse=True)
+            for upstream in sorted_upstreams:
+                name_str = f" ({upstream.asn2_name})" if upstream.asn2_name else ""
+                summary.append(
+                    f"  - AS{upstream.asn2}{name_str}: {upstream.connected_pct:.1f}% visibility"
+                )
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting upstreams for AS{asn}: {str(e)}"
+
+    async def get_as_downstreams(self, asn: int) -> str:
+        """Get downstream customers of an AS.
+
+        Returns the list of networks that buy transit from this AS,
+        derived from observed BGP routing data across 1,700+ global peers.
+        Uses Monocle for accurate relationship data.
+
+        Args:
+            asn: Autonomous System Number (e.g., 15169 for Google).
+
+        Returns:
+            List of downstream customer ASes with visibility information.
+        """
+        if self._monocle is None:
+            return "Monocle is not configured. AS relationship data is not available."
+
+        try:
+            downstreams = await self._monocle.get_as_downstreams(asn)
+
+            if not downstreams:
+                return f"No downstream customers found for AS{asn}. This AS may be a stub network."
+
+            summary = [
+                f"**AS{asn} Downstream Customers**",
+                "",
+                f"**Total downstreams:** {len(downstreams)}",
+                "",
+            ]
+
+            # Sort by visibility
+            sorted_downstreams = sorted(downstreams, key=lambda d: d.connected_pct, reverse=True)
+            for downstream in sorted_downstreams[:30]:
+                name_str = f" ({downstream.asn2_name})" if downstream.asn2_name else ""
+                summary.append(
+                    f"  - AS{downstream.asn2}{name_str}: {downstream.connected_pct:.1f}% visibility"
+                )
+
+            if len(downstreams) > 30:
+                summary.append(f"  ... and {len(downstreams) - 30} more customers")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting downstreams for AS{asn}: {str(e)}"
+
+    async def check_as_relationship(self, asn1: int, asn2: int) -> str:
+        """Check the relationship between two ASes.
+
+        Determines if two ASes are peers, or if one is upstream of the other.
+        Based on observed BGP routing data across 1,700+ global peers.
+
+        Args:
+            asn1: First Autonomous System Number.
+            asn2: Second Autonomous System Number.
+
+        Returns:
+            Description of the relationship between the two ASes.
+        """
+        if self._monocle is None:
+            return "Monocle is not configured. AS relationship data is not available."
+
+        try:
+            relationship = await self._monocle.check_relationship(asn1, asn2)
+
+            if not relationship:
+                return f"No direct relationship found between AS{asn1} and AS{asn2}."
+
+            rel_type = relationship.relationship_type
+            name_str = f" ({relationship.asn2_name})" if relationship.asn2_name else ""
+
+            summary = [
+                f"**Relationship: AS{asn1} ↔ AS{asn2}{name_str}**",
+                "",
+                f"**Type:** {rel_type.upper()}",
+                f"**Visibility:** {relationship.connected_pct:.1f}% of BGP peers observe this relationship",
+                "",
+                "**Breakdown:**",
+                f"  - Peer-to-peer: {relationship.peer_pct:.1f}%",
+                f"  - AS{asn1} as upstream: {relationship.as1_upstream_pct:.1f}%",
+                f"  - AS{asn2} as upstream: {relationship.as2_upstream_pct:.1f}%",
+                "",
+            ]
+
+            # Add interpretation
+            if rel_type == "peer":
+                summary.append(
+                    f"AS{asn1} and AS{asn2} exchange traffic as peers (settlement-free peering)."
+                )
+            elif rel_type == "upstream":
+                summary.append(
+                    f"AS{asn2} provides transit to AS{asn1} (AS{asn2} is a provider)."
+                )
+            elif rel_type == "downstream":
+                summary.append(
+                    f"AS{asn1} provides transit to AS{asn2} (AS{asn1} is a provider)."
+                )
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error checking relationship between AS{asn1} and AS{asn2}: {str(e)}"
+
+    async def get_as_connectivity_summary(self, asn: int) -> str:
+        """Get a connectivity summary for an AS.
+
+        Shows counts of upstreams, peers, and downstreams with top examples.
+        Provides a comprehensive view of the AS's position in the Internet topology.
+        Based on observed BGP routing data across 1,700+ global peers.
+
+        Args:
+            asn: Autonomous System Number (e.g., 15169 for Google).
+
+        Returns:
+            Connectivity summary with neighbor categories and counts.
+        """
+        if self._monocle is None:
+            return "Monocle is not configured. AS relationship data is not available."
+
+        try:
+            connectivity = await self._monocle.get_connectivity(asn)
+
+            summary = [
+                f"**AS{asn} Connectivity Summary**",
+                "",
+                f"**Total neighbors:** {connectivity.total_neighbors} (observed from {connectivity.max_visibility} BGP peers)",
+                "",
+            ]
+
+            # Upstreams section
+            summary.append(f"**Upstreams (Transit Providers):** {len(connectivity.upstreams)}")
+            for upstream in connectivity.upstreams[:5]:
+                name_str = f" {upstream.name}" if upstream.name else ""
+                summary.append(
+                    f"  - AS{upstream.asn}{name_str} ({upstream.peers_percent:.1f}% visibility)"
+                )
+            if len(connectivity.upstreams) > 5:
+                summary.append(f"  ... and {len(connectivity.upstreams) - 5} more")
+            summary.append("")
+
+            # Peers section
+            summary.append(f"**Peers:** {len(connectivity.peers)}")
+            for peer in connectivity.peers[:5]:
+                name_str = f" {peer.name}" if peer.name else ""
+                summary.append(
+                    f"  - AS{peer.asn}{name_str} ({peer.peers_percent:.1f}% visibility)"
+                )
+            if len(connectivity.peers) > 5:
+                summary.append(f"  ... and {len(connectivity.peers) - 5} more")
+            summary.append("")
+
+            # Downstreams section
+            summary.append(f"**Downstreams (Customers):** {len(connectivity.downstreams)}")
+            for downstream in connectivity.downstreams[:5]:
+                name_str = f" {downstream.name}" if downstream.name else ""
+                summary.append(
+                    f"  - AS{downstream.asn}{name_str} ({downstream.peers_percent:.1f}% visibility)"
+                )
+            if len(connectivity.downstreams) > 5:
+                summary.append(f"  ... and {len(connectivity.downstreams) - 5} more")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting connectivity summary for AS{asn}: {str(e)}"

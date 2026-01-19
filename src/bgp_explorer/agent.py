@@ -14,6 +14,7 @@ from bgp_explorer.config import AIBackendType, Settings
 from bgp_explorer.output import OutputFormatter
 from bgp_explorer.sources.bgp_radar import BgpRadarClient
 from bgp_explorer.sources.globalping import GlobalpingClient
+from bgp_explorer.sources.monocle import MonocleClient
 from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
 
@@ -45,6 +46,7 @@ class BGPExplorerAgent:
         self._bgp_radar: Optional[BgpRadarClient] = None
         self._globalping: Optional[GlobalpingClient] = None
         self._peeringdb: Optional[PeeringDBClient] = None
+        self._monocle: Optional[MonocleClient] = None
         self._tools: Optional[BGPTools] = None
         self._running = False
 
@@ -98,6 +100,20 @@ class BGPExplorerAgent:
             self._output.display_info(f"⚠ PeeringDB unavailable: {e}")
             self._peeringdb = None
 
+        # Initialize Monocle client (optional)
+        try:
+            self._monocle = MonocleClient()
+            if await self._monocle.is_available():
+                self._output.display_info("✓ Monocle available (AS relationship data)")
+            else:
+                self._output.display_info(
+                    "⚠ Monocle not found - AS relationship data disabled"
+                )
+                self._monocle = None
+        except Exception as e:
+            self._output.display_info(f"⚠ Monocle unavailable: {e}")
+            self._monocle = None
+
         # Initialize AI backend
         self._ai = self._create_ai_backend()
         self._output.display_info(f"✓ AI backend ready ({self._settings.ai_backend.value})")
@@ -108,6 +124,7 @@ class BGPExplorerAgent:
             bgp_radar=self._bgp_radar,
             globalping=self._globalping,
             peeringdb=self._peeringdb,
+            monocle=self._monocle,
         )
         for tool in self._tools.get_all_tools():
             self._ai.register_tool(tool)
@@ -198,6 +215,9 @@ class BGPExplorerAgent:
 
         if self._peeringdb:
             await self._peeringdb.disconnect()
+
+        if self._monocle:
+            await self._monocle.disconnect()
 
         if self._ripe_stat:
             await self._ripe_stat.disconnect()
