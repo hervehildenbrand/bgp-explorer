@@ -158,13 +158,16 @@ class GlobalpingClient(DataSource):
 
     def _parse_locations(
         self,
-        locations: Optional[list[dict[str, Any]]] = None,
+        locations: Optional[list[dict[str, Any] | str]] = None,
         limit: int = 3,
     ) -> list[dict[str, Any]]:
         """Parse and validate location specifications.
 
         Args:
-            locations: List of location dicts with keys like 'country', 'continent', 'asn'.
+            locations: List of location specs. Can be dicts with keys like
+                'country', 'continent', 'asn', or simple strings like
+                'EU', 'US', 'Europe', 'Asia' which will be converted to
+                continent/region filters.
             limit: Number of probes per location when using defaults.
 
         Returns:
@@ -172,11 +175,42 @@ class GlobalpingClient(DataSource):
         """
         if not locations:
             return self._default_locations(limit)
-        # Add limit to each location if not specified
+
+        # Map common region names to continent codes
+        region_map = {
+            "europe": "EU",
+            "eu": "EU",
+            "north america": "NA",
+            "na": "NA",
+            "us": "NA",
+            "usa": "NA",
+            "asia": "AS",
+            "as": "AS",
+            "oceania": "OC",
+            "oc": "OC",
+            "australia": "OC",
+            "south america": "SA",
+            "sa": "SA",
+            "africa": "AF",
+            "af": "AF",
+        }
+
         result = []
         for loc in locations:
-            if "limit" not in loc:
-                loc = {**loc, "limit": limit}
+            if isinstance(loc, str):
+                # Convert string to location dict
+                loc_lower = loc.lower().strip()
+                if loc_lower in region_map:
+                    loc = {"continent": region_map[loc_lower], "limit": limit}
+                elif len(loc) == 2:
+                    # Assume 2-letter code is a country code
+                    loc = {"country": loc.upper(), "limit": limit}
+                else:
+                    # Try as continent code or country name
+                    loc = {"continent": loc.upper(), "limit": limit}
+            elif isinstance(loc, dict):
+                if "limit" not in loc:
+                    loc = {**loc, "limit": limit}
             result.append(loc)
         return result
 
@@ -334,7 +368,7 @@ class GlobalpingClient(DataSource):
         self,
         target: str,
         locations: Optional[list[dict[str, Any]]] = None,
-        protocol: str = "UDP",
+        protocol: str = "ICMP",
         port: Optional[int] = None,
         limit: int = 3,
     ) -> MeasurementResult:
@@ -343,8 +377,8 @@ class GlobalpingClient(DataSource):
         Args:
             target: Target IP or hostname.
             locations: List of probe locations.
-            protocol: Protocol to use (UDP, ICMP, TCP). UDP is default as it
-                     works through more firewalls than ICMP.
+            protocol: Protocol to use (ICMP, UDP, TCP). ICMP is the default
+                     and works well for most destinations.
             port: Port for TCP/UDP traceroute.
             limit: Number of probes per location (default: 3).
 
@@ -361,7 +395,7 @@ class GlobalpingClient(DataSource):
         target: str,
         locations: Optional[list[dict[str, Any]]] = None,
         packets: int = 3,
-        protocol: str = "UDP",
+        protocol: str = "ICMP",
         limit: int = 3,
     ) -> MeasurementResult:
         """Run MTR (My Traceroute) from global probes.
@@ -373,7 +407,7 @@ class GlobalpingClient(DataSource):
             target: Target IP or hostname.
             locations: List of probe locations.
             packets: Number of packets per hop.
-            protocol: Protocol to use (UDP, ICMP, TCP). UDP is default.
+            protocol: Protocol to use (ICMP, UDP, TCP). ICMP is the default.
             limit: Number of probes per location (default: 3).
 
         Returns:

@@ -258,6 +258,33 @@ class TestGlobalpingClient:
         assert loc5 == [{"country": "FR", "limit": 10}]
 
     @pytest.mark.asyncio
+    async def test_locations_parsing_strings(self, client):
+        """Test location parsing with string inputs (as AI might provide)."""
+        # Test with continent name
+        loc1 = client._parse_locations(["Europe"])
+        assert loc1 == [{"continent": "EU", "limit": 3}]
+
+        # Test with continent code
+        loc2 = client._parse_locations(["EU"])
+        assert loc2 == [{"continent": "EU", "limit": 3}]
+
+        # Test with region alias
+        loc3 = client._parse_locations(["US"])
+        assert loc3 == [{"continent": "NA", "limit": 3}]
+
+        # Test with 2-letter country code
+        loc4 = client._parse_locations(["DE"])
+        assert loc4 == [{"country": "DE", "limit": 3}]
+
+        # Test mixed string and dict
+        loc5 = client._parse_locations(["EU", {"country": "US"}])
+        assert loc5 == [{"continent": "EU", "limit": 3}, {"country": "US", "limit": 3}]
+
+        # Test multiple regions
+        loc6 = client._parse_locations(["Europe", "Asia"])
+        assert loc6 == [{"continent": "EU", "limit": 3}, {"continent": "AS", "limit": 3}]
+
+    @pytest.mark.asyncio
     async def test_default_locations(self, client):
         """Test default global locations."""
         defaults = client._default_locations()
