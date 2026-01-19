@@ -1,6 +1,7 @@
 """CLI entrypoint for BGP Explorer."""
 
 import asyncio
+import os
 import shutil
 import subprocess
 import sys
@@ -194,17 +195,38 @@ def install_deps():
     click.echo("Installing monocle (Rust/Cargo)...")
     click.echo("=" * 50)
 
-    if shutil.which("cargo"):
+    # Check for cargo, also check common locations if not in PATH
+    cargo_path = shutil.which("cargo")
+    if not cargo_path:
+        # Check common cargo locations
+        home = os.path.expanduser("~")
+        cargo_candidates = [
+            os.path.join(home, ".cargo", "bin", "cargo"),
+        ]
+        for candidate in cargo_candidates:
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                cargo_path = candidate
+                break
+
+    if cargo_path:
         try:
+            # Use the found cargo path
             result = subprocess.run(
-                ["cargo", "install", "monocle"],
+                [cargo_path, "install", "monocle"],
                 capture_output=True,
                 text=True,
                 timeout=600,  # Rust builds can take longer
             )
             if result.returncode == 0:
-                # Verify installation
-                if shutil.which("monocle"):
+                # Check for monocle in PATH and common locations
+                monocle_path = shutil.which("monocle")
+                if not monocle_path:
+                    home = os.path.expanduser("~")
+                    monocle_candidate = os.path.join(home, ".cargo", "bin", "monocle")
+                    if os.path.isfile(monocle_candidate):
+                        monocle_path = monocle_candidate
+
+                if monocle_path:
                     click.echo(click.style("✓ monocle installed successfully", fg="green"))
                     success_count += 1
                 else:
@@ -212,7 +234,7 @@ def install_deps():
                     click.echo(click.style("  Note: Ensure ~/.cargo/bin is in your PATH", fg="yellow"))
                     success_count += 1
             else:
-                click.echo(click.style(f"✗ Failed to install monocle", fg="red"))
+                click.echo(click.style("✗ Failed to install monocle", fg="red"))
                 if result.stderr:
                     # Cargo outputs to stderr even on success, filter errors
                     error_lines = [l for l in result.stderr.split('\n') if 'error' in l.lower()]
@@ -223,8 +245,53 @@ def install_deps():
         except Exception as e:
             click.echo(click.style(f"✗ Error: {e}", fg="red"))
     else:
-        click.echo(click.style("✗ Rust/Cargo is not installed", fg="red"))
-        click.echo("  Install Rust from: https://rustup.rs/")
+        # Rust not installed - offer to install it
+        click.echo(click.style("Rust/Cargo is not installed.", fg="yellow"))
+        click.echo()
+
+        if click.confirm("Would you like to install Rust automatically?", default=True):
+            click.echo("Installing Rust via rustup...")
+            try:
+                # Download and run rustup installer
+                result = subprocess.run(
+                    ["sh", "-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode == 0:
+                    click.echo(click.style("✓ Rust installed successfully", fg="green"))
+
+                    # Now install monocle with the new cargo
+                    home = os.path.expanduser("~")
+                    cargo_path = os.path.join(home, ".cargo", "bin", "cargo")
+
+                    if os.path.isfile(cargo_path):
+                        click.echo("Installing monocle...")
+                        result = subprocess.run(
+                            [cargo_path, "install", "monocle"],
+                            capture_output=True,
+                            text=True,
+                            timeout=600,
+                        )
+                        if result.returncode == 0:
+                            click.echo(click.style("✓ monocle installed successfully", fg="green"))
+                            success_count += 1
+                        else:
+                            click.echo(click.style("✗ Failed to install monocle", fg="red"))
+                    else:
+                        click.echo(click.style("✗ Cargo not found after Rust install", fg="red"))
+                else:
+                    click.echo(click.style("✗ Failed to install Rust", fg="red"))
+                    if result.stderr:
+                        click.echo(f"  Error: {result.stderr[:200]}")
+            except subprocess.TimeoutExpired:
+                click.echo(click.style("✗ Installation timed out", fg="red"))
+            except Exception as e:
+                click.echo(click.style(f"✗ Error: {e}", fg="red"))
+        else:
+            click.echo("  Install Rust manually from: https://rustup.rs/")
+            click.echo("  Then run 'bgp-explorer install-deps' again")
 
     click.echo()
 
