@@ -3,6 +3,9 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://github.com/hervehildenbrand/bgp-explorer/actions/workflows/test.yml/badge.svg)](https://github.com/hervehildenbrand/bgp-explorer/actions/workflows/test.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Anthropic](https://img.shields.io/badge/AI-Claude-blueviolet)](https://www.anthropic.com/)
 
 AI-powered CLI for querying live and historical internet routing data using natural language.
 
