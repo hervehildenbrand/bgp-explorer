@@ -206,7 +206,6 @@ class ClaudeBackend(AIBackend):
             thinking_blocks = []
             current_thinking = ""
             current_tool_id = None
-            current_tool_name = None
             current_tool_input = ""
             stop_reason = None
 
@@ -219,7 +218,6 @@ class ClaudeBackend(AIBackend):
                             current_thinking = ""
                         elif block.type == "tool_use":
                             current_tool_id = block.id
-                            current_tool_name = block.name
                             current_tool_input = ""
                     elif event.type == "content_block_delta":
                         delta = event.delta
@@ -242,7 +240,6 @@ class ClaudeBackend(AIBackend):
                             current_thinking = ""
                         if current_tool_id:
                             current_tool_id = None
-                            current_tool_name = None
                             current_tool_input = ""
 
                 # Get final message with signatures for history
