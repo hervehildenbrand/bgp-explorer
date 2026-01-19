@@ -36,7 +36,7 @@ class ClaudeBackend(AIBackend):
         system_prompt: str | None = None,
         max_iterations: int = 20,
         max_tokens: int = 16000,
-        thinking_budget: int = 10000,
+        thinking_budget: int = 32000,
     ):
         """Initialize the Claude backend.
 

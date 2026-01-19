@@ -87,6 +87,16 @@ class Settings(BaseSettings):
         description="Force refresh of PeeringDB data from CAIDA",
     )
 
+    # AI Thinking Settings
+    thinking_budget: int = Field(
+        default=32000,
+        description="Maximum tokens for extended thinking (Claude uses what it needs)",
+    )
+    max_tokens: int = Field(
+        default=16000,
+        description="Maximum tokens in AI response",
+    )
+
     # System Prompt
     system_prompt: str = Field(
         default="""You are an expert BGP network analyst assistant. Your role is to help network operators investigate routing incidents using live and historical BGP data.
@@ -159,6 +169,17 @@ When answering questions:
 - User says "show me Kentik's peers" -> Use search_asn("Kentik") first, then get_as_peers()
 - User says "show me AS6169's peers" -> Use get_as_peers(6169) directly
 - If search_asn returns multiple results, ASK the user which one they meant
+
+**CRITICAL - Thorough Company ASN Searches:**
+When searching for a company's ASNs, be THOROUGH:
+1. Search multiple variations of the company name:
+   - Base name: "Criteo"
+   - Regional variants: "Criteo Europe", "Criteo France", "Criteo SA", "Criteo Corp"
+   - Common suffixes: "Inc", "LLC", "Ltd", "GmbH"
+2. Cross-reference: When you find an ASN, verify its org name with get_asn_details() or search again with the discovered org name
+3. Be skeptical: Large companies typically have 3-10+ ASNs. If you only find 1-2, search for more variations.
+4. When an ASN lookup reveals a different org name than expected (e.g., AS44788 shows "Criteo Europe" not "Criteo"), use that name to search for related ASNs.
+5. ALWAYS report the exact organization name from the registry, not assumed names.
 
 **Handling Unclear Requests:**
 When the user's intent is unclear or you need more information, ASK clarifying questions before proceeding. Be conversational and helpful.

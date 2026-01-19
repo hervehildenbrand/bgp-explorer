@@ -107,6 +107,8 @@ class BGPExplorerAgent:
             api_key=self._settings.get_api_key(),
             model=self._settings.claude_model.model_id,
             system_prompt=self._settings.system_prompt,
+            thinking_budget=self._settings.thinking_budget,
+            max_tokens=self._settings.max_tokens,
         )
         self._output.display_info(f"✓ AI backend ready (claude/{self._settings.claude_model.value})")
 

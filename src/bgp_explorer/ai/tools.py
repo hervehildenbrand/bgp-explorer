@@ -146,11 +146,14 @@ class BGPTools:
         return tools
 
     async def search_asn(self, query: str) -> str:
-        """Search for ASNs by organization or company name.
+        """Search for ASNs by organization or company name with fuzzy matching.
 
         IMPORTANT: Use this tool FIRST when a user asks about a network by name
         (e.g., "Kentik", "Google", "Cloudflare") without providing an ASN number.
         This helps find the correct ASN before using other tools.
+
+        This tool automatically searches for common variations of the company name
+        (e.g., "Criteo", "Criteo Europe", "Criteo SA") to find all related ASNs.
 
         Args:
             query: Organization name or partial name to search for (e.g., "Kentik", "Google").
@@ -160,29 +163,64 @@ class BGPTools:
             ask the user to confirm which ASN they meant.
         """
         try:
-            results = await self._ripe_stat.search_asn(query)
+            # Generate search variations for thorough matching
+            variations = [query]
 
-            if not results:
+            # Add common regional/legal suffixes
+            common_suffixes = ["Europe", "France", "US", "USA", "Corp", "Inc", "SA", "Ltd", "GmbH", "LLC"]
+            for suffix in common_suffixes:
+                if suffix.lower() not in query.lower():
+                    variations.append(f"{query} {suffix}")
+
+            # Search all variations and collect unique results
+            seen_asns = set()
+            all_results = []
+
+            for variation in variations:
+                try:
+                    results = await self._ripe_stat.search_asn(variation)
+                    for result in results:
+                        asn = result["asn"]
+                        if asn not in seen_asns:
+                            seen_asns.add(asn)
+                            all_results.append(result)
+                except Exception:
+                    # Continue with other variations if one fails
+                    continue
+
+            if not all_results:
                 return (
-                    f"No ASNs found matching '{query}'. "
-                    "Please ask the user for the ASN number, or try a different search term."
+                    f"No ASNs found matching '{query}' or its variations. "
+                    "Try searching with different terms, or ask the user for the ASN number directly."
                 )
+
+            # Sort by ASN for consistent ordering
+            all_results.sort(key=lambda x: x["asn"])
 
             summary = [
                 f"**ASN Search Results for '{query}':**",
                 "",
-                f"**Found {len(results)} matching ASN(s):**",
+                f"**Found {len(all_results)} matching ASN(s):**",
                 "",
             ]
 
-            for result in results[:10]:
+            for result in all_results[:15]:
                 summary.append(f"  - **AS{result['asn']}**: {result['description']}")
 
-            if len(results) > 10:
-                summary.append(f"  ... and {len(results) - 10} more")
+            if len(all_results) > 15:
+                summary.append(f"  ... and {len(all_results) - 15} more")
 
-            if len(results) > 1:
-                summary.append("")
+            # Add guidance about potential missing ASNs
+            summary.append("")
+            if len(all_results) <= 3:
+                summary.append(
+                    "**Note:** Only a few ASNs found. Large companies often have more ASNs registered "
+                    "under different names. Consider:\n"
+                    "  - Searching for regional variants (e.g., 'Company Europe', 'Company France')\n"
+                    "  - Using get_asn_details() on found ASNs to discover the exact org name\n"
+                    "  - Searching again with the exact org name from the registry"
+                )
+            elif len(all_results) > 1:
                 summary.append(
                     "**Multiple matches found.** Please confirm with the user which ASN they meant "
                     "before proceeding with other queries."
