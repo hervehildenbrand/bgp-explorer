@@ -35,8 +35,8 @@ class ClaudeBackend(AIBackend):
         model: str = "claude-sonnet-4-5-20250929",
         system_prompt: str | None = None,
         max_iterations: int = 20,
-        max_tokens: int = 16000,
-        thinking_budget: int = 32000,
+        max_tokens: int = 32000,
+        thinking_budget: int = 16000,
     ):
         """Initialize the Claude backend.
 
@@ -183,7 +183,7 @@ class ClaudeBackend(AIBackend):
         while iterations < self._max_iterations:
             iterations += 1
 
-            # Call the model with extended thinking
+            # Call the model with extended thinking using streaming
             kwargs = {
                 "model": self._model_name,
                 "max_tokens": self._max_tokens,
@@ -200,40 +200,75 @@ class ClaudeBackend(AIBackend):
             if self._tool_schemas:
                 kwargs["tools"] = self._tool_schemas
 
-            response = self._client.messages.create(**kwargs)
-
-            # Process response - capture thinking blocks for history
+            # Use streaming to handle extended thinking (required by API for long operations)
             tool_calls = []
             text_parts = []
             thinking_blocks = []
+            current_thinking = ""
+            current_tool_id = None
+            current_tool_name = None
+            current_tool_input = ""
+            stop_reason = None
 
-            for block in response.content:
-                if block.type == "thinking":
-                    # Extended thinking - must be preserved in history
-                    thinking_blocks.append(ThinkingBlock(
-                        thinking=block.thinking,
-                        signature=getattr(block, 'signature', None),
-                    ))
-                    # Emit thinking summary for display
-                    if on_event and block.thinking:
-                        summary = self._extract_thinking_summary(block.thinking)
-                        if summary:
-                            on_event(ChatEvent(
-                                type="thinking_summary",
-                                data={"summary": summary, "iteration": iterations},
-                            ))
-                elif block.type == "text":
-                    text_parts.append(block.text)
-                elif block.type == "tool_use":
-                    tool_calls.append(
-                        ToolCall(
-                            id=block.id,
-                            name=block.name,
-                            arguments=block.input,
+            with self._client.messages.stream(**kwargs) as stream:
+                # Process streaming events for real-time UI updates
+                for event in stream:
+                    if event.type == "content_block_start":
+                        block = event.content_block
+                        if block.type == "thinking":
+                            current_thinking = ""
+                        elif block.type == "tool_use":
+                            current_tool_id = block.id
+                            current_tool_name = block.name
+                            current_tool_input = ""
+                    elif event.type == "content_block_delta":
+                        delta = event.delta
+                        if delta.type == "thinking_delta":
+                            current_thinking += delta.thinking
+                        elif delta.type == "text_delta":
+                            text_parts.append(delta.text)
+                        elif delta.type == "input_json_delta":
+                            current_tool_input += delta.partial_json
+                    elif event.type == "content_block_stop":
+                        # Emit thinking summary for display during streaming
+                        if current_thinking:
+                            if on_event:
+                                summary = self._extract_thinking_summary(current_thinking)
+                                if summary:
+                                    on_event(ChatEvent(
+                                        type="thinking_summary",
+                                        data={"summary": summary, "iteration": iterations},
+                                    ))
+                            current_thinking = ""
+                        if current_tool_id:
+                            current_tool_id = None
+                            current_tool_name = None
+                            current_tool_input = ""
+
+                # Get final message with signatures for history
+                final_message = stream.get_final_message()
+                stop_reason = final_message.stop_reason
+
+                # Process final message content to get proper signatures
+                for block in final_message.content:
+                    if block.type == "thinking":
+                        thinking_blocks.append(ThinkingBlock(
+                            thinking=block.thinking,
+                            signature=getattr(block, 'signature', None),
+                        ))
+                    elif block.type == "text":
+                        # text_parts already populated from streaming
+                        pass
+                    elif block.type == "tool_use":
+                        tool_calls.append(
+                            ToolCall(
+                                id=block.id,
+                                name=block.name,
+                                arguments=block.input,
+                            )
                         )
-                    )
 
-            if tool_calls and response.stop_reason == "tool_use":
+            if tool_calls and stop_reason == "tool_use":
                 # Execute tools and continue loop
                 tool_results = await self._execute_tools(tool_calls, on_event)
 
@@ -450,13 +485,15 @@ class ClaudeBackend(AIBackend):
                 content = []
 
                 # Add thinking blocks first (required by API when thinking is enabled)
+                # Note: Only include blocks with valid signatures (streaming may not provide them)
                 if msg.thinking_blocks:
                     for tb in msg.thinking_blocks:
-                        content.append({
-                            "type": "thinking",
-                            "thinking": tb.thinking,
-                            "signature": tb.signature,
-                        })
+                        if tb.signature:  # Signature is required by API
+                            content.append({
+                                "type": "thinking",
+                                "thinking": tb.thinking,
+                                "signature": tb.signature,
+                            })
 
                 # Add tool calls
                 if msg.tool_calls:

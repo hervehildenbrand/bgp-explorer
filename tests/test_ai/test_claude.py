@@ -82,16 +82,40 @@ class TestClaudeBackend:
         )
         assert backend._system_prompt == "You are a BGP expert."
 
+    def _create_mock_stream(self, text_content: str, stop_reason: str = "end_turn"):
+        """Helper to create mock streaming events."""
+        # Create mock events for streaming
+        events = [
+            # Text content block
+            MagicMock(
+                type="content_block_start",
+                content_block=MagicMock(type="text"),
+            ),
+            MagicMock(
+                type="content_block_delta",
+                delta=MagicMock(type="text_delta", text=text_content),
+            ),
+            MagicMock(type="content_block_stop"),
+            # Message complete
+            MagicMock(
+                type="message_delta",
+                delta=MagicMock(stop_reason=stop_reason),
+            ),
+            MagicMock(type="message_stop"),
+        ]
+        return events
+
     @pytest.mark.asyncio
     async def test_chat_simple_response(self, mock_anthropic):
         """Test simple chat response without tool calls."""
-        # Set up mock response
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(type="text", text="Hello!")]
-        mock_response.stop_reason = "end_turn"
+        # Set up mock streaming response
+        mock_stream = MagicMock()
+        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
+        mock_stream.__exit__ = MagicMock(return_value=False)
+        mock_stream.__iter__ = MagicMock(return_value=iter(self._create_mock_stream("Hello!")))
 
         mock_client = MagicMock()
-        mock_client.messages.create = MagicMock(return_value=mock_response)
+        mock_client.messages.stream = MagicMock(return_value=mock_stream)
         mock_anthropic.Anthropic.return_value = mock_client
 
         backend = ClaudeBackend(api_key="test-key")
@@ -103,12 +127,14 @@ class TestClaudeBackend:
     @pytest.mark.asyncio
     async def test_chat_adds_to_history(self, mock_anthropic):
         """Test that chat adds messages to history."""
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(type="text", text="Response")]
-        mock_response.stop_reason = "end_turn"
+        # Set up mock streaming response
+        mock_stream = MagicMock()
+        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
+        mock_stream.__exit__ = MagicMock(return_value=False)
+        mock_stream.__iter__ = MagicMock(return_value=iter(self._create_mock_stream("Response")))
 
         mock_client = MagicMock()
-        mock_client.messages.create = MagicMock(return_value=mock_response)
+        mock_client.messages.stream = MagicMock(return_value=mock_stream)
         mock_anthropic.Anthropic.return_value = mock_client
 
         backend = ClaudeBackend(api_key="test-key")

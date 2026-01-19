@@ -89,12 +89,12 @@ class Settings(BaseSettings):
 
     # AI Thinking Settings
     thinking_budget: int = Field(
-        default=32000,
+        default=16000,
         description="Maximum tokens for extended thinking (Claude uses what it needs)",
     )
     max_tokens: int = Field(
-        default=16000,
-        description="Maximum tokens in AI response",
+        default=32000,
+        description="Maximum tokens in AI response (must be > thinking_budget)",
     )
 
     # System Prompt
