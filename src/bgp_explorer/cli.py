@@ -349,7 +349,7 @@ def install_deps():
                 click.echo(click.style("✗ Failed to install monocle", fg="red"))
                 if result.stderr:
                     # Cargo outputs to stderr even on success, filter errors
-                    error_lines = [l for l in result.stderr.split('\n') if 'error' in l.lower()]
+                    error_lines = [line for line in result.stderr.split('\n') if 'error' in line.lower()]
                     if error_lines:
                         click.echo(f"  Error: {error_lines[0]}")
         except subprocess.TimeoutExpired:
@@ -418,7 +418,7 @@ def install_deps():
         click.echo(click.style(f"⚠ {success_count}/{total_deps} dependencies installed", fg="yellow"))
         click.echo("  Some features may not be available.")
     else:
-        click.echo(click.style(f"✗ No dependencies could be installed", fg="red"))
+        click.echo(click.style("✗ No dependencies could be installed", fg="red"))
         click.echo("  Please install Go and/or Rust first.")
 
     click.echo()
