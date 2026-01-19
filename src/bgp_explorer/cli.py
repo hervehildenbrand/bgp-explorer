@@ -159,25 +159,52 @@ def install_deps():
     click.echo("Installing bgp-radar (Go)...")
     click.echo("=" * 50)
 
-    if shutil.which("go"):
+    # Check for go, also check common locations if not in PATH
+    go_path = shutil.which("go")
+    if not go_path:
+        home = os.path.expanduser("~")
+        go_candidates = [
+            os.path.join(home, "go", "bin", "go"),
+            os.path.join(home, ".local", "go", "bin", "go"),
+            "/usr/local/go/bin/go",
+        ]
+        for candidate in go_candidates:
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                go_path = candidate
+                break
+
+    if go_path:
         try:
+            # Set GOPATH for installation
+            home = os.path.expanduser("~")
+            env = os.environ.copy()
+            env["GOPATH"] = os.path.join(home, "go")
+            env["PATH"] = f"{os.path.join(home, 'go', 'bin')}:{env.get('PATH', '')}"
+
             result = subprocess.run(
-                ["go", "install", "github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest"],
+                [go_path, "install", "github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest"],
                 capture_output=True,
                 text=True,
                 timeout=300,
+                env=env,
             )
             if result.returncode == 0:
-                # Verify installation
-                if shutil.which("bgp-radar"):
+                # Check for bgp-radar in PATH and common locations
+                bgp_radar_path = shutil.which("bgp-radar")
+                if not bgp_radar_path:
+                    bgp_radar_candidate = os.path.join(home, "go", "bin", "bgp-radar")
+                    if os.path.isfile(bgp_radar_candidate):
+                        bgp_radar_path = bgp_radar_candidate
+
+                if bgp_radar_path:
                     click.echo(click.style("✓ bgp-radar installed successfully", fg="green"))
                     success_count += 1
                 else:
                     click.echo(click.style("✓ bgp-radar built successfully", fg="green"))
-                    click.echo(click.style("  Note: Ensure $GOPATH/bin is in your PATH", fg="yellow"))
+                    click.echo(click.style("  Note: Ensure ~/go/bin is in your PATH", fg="yellow"))
                     success_count += 1
             else:
-                click.echo(click.style(f"✗ Failed to install bgp-radar", fg="red"))
+                click.echo(click.style("✗ Failed to install bgp-radar", fg="red"))
                 if result.stderr:
                     click.echo(f"  Error: {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
@@ -185,8 +212,93 @@ def install_deps():
         except Exception as e:
             click.echo(click.style(f"✗ Error: {e}", fg="red"))
     else:
-        click.echo(click.style("✗ Go is not installed", fg="red"))
-        click.echo("  Install Go from: https://go.dev/doc/install")
+        # Go not installed - offer to install it
+        click.echo(click.style("Go is not installed.", fg="yellow"))
+        click.echo()
+
+        if click.confirm("Would you like to install Go automatically?", default=True):
+            click.echo("Installing Go...")
+            try:
+                # Detect architecture
+                import platform
+                machine = platform.machine().lower()
+                if machine in ("x86_64", "amd64"):
+                    arch = "amd64"
+                elif machine in ("aarch64", "arm64"):
+                    arch = "arm64"
+                else:
+                    click.echo(click.style(f"✗ Unsupported architecture: {machine}", fg="red"))
+                    arch = None
+
+                system = platform.system().lower()
+                if system == "darwin":
+                    os_name = "darwin"
+                elif system == "linux":
+                    os_name = "linux"
+                else:
+                    click.echo(click.style(f"✗ Unsupported OS: {system}", fg="red"))
+                    os_name = None
+
+                if arch and os_name:
+                    # Get latest Go version and download
+                    go_version = "1.23.5"  # Recent stable version
+                    go_tarball = f"go{go_version}.{os_name}-{arch}.tar.gz"
+                    go_url = f"https://go.dev/dl/{go_tarball}"
+
+                    home = os.path.expanduser("~")
+                    go_install_dir = os.path.join(home, ".local")
+                    os.makedirs(go_install_dir, exist_ok=True)
+
+                    # Download and extract Go
+                    click.echo(f"  Downloading Go {go_version}...")
+                    result = subprocess.run(
+                        ["sh", "-c", f"curl -sL {go_url} | tar -xz -C {go_install_dir}"],
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+
+                    if result.returncode == 0:
+                        go_path = os.path.join(go_install_dir, "go", "bin", "go")
+                        if os.path.isfile(go_path):
+                            click.echo(click.style("✓ Go installed successfully", fg="green"))
+
+                            # Now install bgp-radar
+                            click.echo("  Installing bgp-radar...")
+                            env = os.environ.copy()
+                            env["GOPATH"] = os.path.join(home, "go")
+                            env["GOROOT"] = os.path.join(go_install_dir, "go")
+                            env["PATH"] = f"{os.path.join(home, 'go', 'bin')}:{os.path.join(go_install_dir, 'go', 'bin')}:{env.get('PATH', '')}"
+
+                            result = subprocess.run(
+                                [go_path, "install", "github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest"],
+                                capture_output=True,
+                                text=True,
+                                timeout=300,
+                                env=env,
+                            )
+                            if result.returncode == 0:
+                                click.echo(click.style("✓ bgp-radar installed successfully", fg="green"))
+                                click.echo(click.style("  Note: Add ~/.local/go/bin and ~/go/bin to your PATH", fg="yellow"))
+                                success_count += 1
+                            else:
+                                click.echo(click.style("✗ Failed to install bgp-radar", fg="red"))
+                                if result.stderr:
+                                    click.echo(f"  Error: {result.stderr.strip()[:200]}")
+                        else:
+                            click.echo(click.style("✗ Go binary not found after extraction", fg="red"))
+                    else:
+                        click.echo(click.style("✗ Failed to download/extract Go", fg="red"))
+                        if result.stderr:
+                            click.echo(f"  Error: {result.stderr.strip()[:200]}")
+
+            except subprocess.TimeoutExpired:
+                click.echo(click.style("✗ Installation timed out", fg="red"))
+            except Exception as e:
+                click.echo(click.style(f"✗ Error: {e}", fg="red"))
+        else:
+            click.echo("  Install Go manually from: https://go.dev/doc/install")
+            click.echo("  Then run 'bgp-explorer install-deps' again")
 
     click.echo()
 
