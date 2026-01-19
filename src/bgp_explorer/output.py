@@ -82,7 +82,7 @@ AI-powered assistant for BGP routing investigation.
 - Tell me about AMS-IX
 
 **AS Relationships** (from Monocle - observed BGP data)
-- How many peers does AS47957 have?
+- How many peers does Cloudflare have?
 - Who are the upstream providers for Google?
 - Is AS13335 a peer of AS3356?
 - Show downstream customers of Level3
