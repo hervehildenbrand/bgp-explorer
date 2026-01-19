@@ -148,7 +148,7 @@ Options:
 ## Architecture
 
 ```
-User → CLI (cli.py) → Agent (agent.py) → AI Backend (gemini/claude)
+User → CLI (cli.py) → Agent (agent.py) → AI Backend (claude)
                                               ↓
                                         Tools (ai/tools.py)
                                               ↓
