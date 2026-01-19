@@ -167,7 +167,7 @@ class TestAgentInitialization:
             MockPeeringDB.return_value = mock_peeringdb
 
             mock_monocle = AsyncMock()
-            mock_monocle.is_available = AsyncMock(return_value=False)
+            mock_monocle.is_available = AsyncMock(return_value=True)
             MockMonocle.return_value = mock_monocle
 
             mock_claude = MagicMock()
@@ -181,3 +181,57 @@ class TestAgentInitialization:
             mock_bgp_radar.start.assert_not_called()
             # But callback should be wired
             mock_bgp_radar.set_event_callback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_initialization_fails_when_bgp_radar_not_available(self, settings, output):
+        """Test that initialization fails when bgp-radar is not available."""
+        with patch("bgp_explorer.agent.BgpRadarClient") as MockBgpRadar, \
+             patch("bgp_explorer.agent.RipeStatClient") as MockRipeStat:
+
+            # Setup mocks - bgp-radar not available
+            mock_bgp_radar = AsyncMock()
+            mock_bgp_radar.is_available = AsyncMock(return_value=False)
+            MockBgpRadar.return_value = mock_bgp_radar
+
+            mock_ripe_stat = AsyncMock()
+            MockRipeStat.return_value = mock_ripe_stat
+
+            agent = BGPExplorerAgent(settings=settings, output=output)
+
+            # Should raise RuntimeError when bgp-radar is not available
+            with pytest.raises(RuntimeError, match="bgp-radar"):
+                await agent.initialize()
+
+    @pytest.mark.asyncio
+    async def test_initialization_fails_when_monocle_not_available(self, settings, output):
+        """Test that initialization fails when monocle is not available."""
+        with patch("bgp_explorer.agent.BgpRadarClient") as MockBgpRadar, \
+             patch("bgp_explorer.agent.RipeStatClient") as MockRipeStat, \
+             patch("bgp_explorer.agent.GlobalpingClient") as MockGlobalping, \
+             patch("bgp_explorer.agent.PeeringDBClient") as MockPeeringDB, \
+             patch("bgp_explorer.agent.MonocleClient") as MockMonocle:
+
+            # Setup mocks - bgp-radar available, monocle not available
+            mock_bgp_radar = AsyncMock()
+            mock_bgp_radar.is_available = AsyncMock(return_value=True)
+            mock_bgp_radar.set_event_callback = MagicMock()
+            MockBgpRadar.return_value = mock_bgp_radar
+
+            mock_ripe_stat = AsyncMock()
+            MockRipeStat.return_value = mock_ripe_stat
+
+            mock_globalping = AsyncMock()
+            MockGlobalping.return_value = mock_globalping
+
+            mock_peeringdb = AsyncMock()
+            MockPeeringDB.return_value = mock_peeringdb
+
+            mock_monocle = AsyncMock()
+            mock_monocle.is_available = AsyncMock(return_value=False)
+            MockMonocle.return_value = mock_monocle
+
+            agent = BGPExplorerAgent(settings=settings, output=output)
+
+            # Should raise RuntimeError when monocle is not available
+            with pytest.raises(RuntimeError, match="monocle"):
+                await agent.initialize()

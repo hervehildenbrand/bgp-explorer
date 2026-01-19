@@ -45,9 +45,14 @@ uv sync --extra bgpstream
 
 - **Python 3.11+**
 - **Anthropic API Key** from [Anthropic Console](https://console.anthropic.com/)
-- **bgp-radar** (optional): For real-time anomaly detection
+- **bgp-radar** (required): Real-time anomaly detection
   ```bash
   go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest
+  ```
+- **monocle** (required): AS relationship data
+  ```bash
+  # See https://github.com/bgpkit/monocle for installation
+  cargo install monocle
   ```
 
 ## Configuration

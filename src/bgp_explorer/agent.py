@@ -59,26 +59,21 @@ class BGPExplorerAgent:
         await self._ripe_stat.connect()
         self._output.display_info("✓ Connected to RIPE Stat")
 
-        # Initialize bgp-radar client (optional, opt-in monitoring)
-        try:
-            self._bgp_radar = BgpRadarClient(
-                binary_path=self._settings.bgp_radar_path,
-                collectors=self._settings.collectors,
+        # Initialize bgp-radar client (required)
+        self._bgp_radar = BgpRadarClient(
+            binary_path=self._settings.bgp_radar_path,
+            collectors=self._settings.collectors,
+        )
+        if not await self._bgp_radar.is_available():
+            raise RuntimeError(
+                "bgp-radar is required but not found. "
+                "Install with: go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest"
             )
-            if await self._bgp_radar.is_available():
-                # Wire up event callback for real-time display
-                self._bgp_radar.set_event_callback(self._on_bgp_event)
-                self._output.display_info(
-                    "✓ bgp-radar available (use /monitor start or ask to begin monitoring)"
-                )
-            else:
-                self._output.display_info(
-                    "⚠ bgp-radar not found - real-time anomaly detection disabled"
-                )
-                self._bgp_radar = None
-        except Exception as e:
-            self._output.display_info(f"⚠ bgp-radar unavailable: {e}")
-            self._bgp_radar = None
+        # Wire up event callback for real-time display
+        self._bgp_radar.set_event_callback(self._on_bgp_event)
+        self._output.display_info(
+            "✓ bgp-radar available (use /monitor start or ask to begin monitoring)"
+        )
 
         # Initialize Globalping client (optional)
         try:
@@ -98,19 +93,14 @@ class BGPExplorerAgent:
             self._output.display_info(f"⚠ PeeringDB unavailable: {e}")
             self._peeringdb = None
 
-        # Initialize Monocle client (optional)
-        try:
-            self._monocle = MonocleClient()
-            if await self._monocle.is_available():
-                self._output.display_info("✓ Monocle available (AS relationship data)")
-            else:
-                self._output.display_info(
-                    "⚠ Monocle not found - AS relationship data disabled"
-                )
-                self._monocle = None
-        except Exception as e:
-            self._output.display_info(f"⚠ Monocle unavailable: {e}")
-            self._monocle = None
+        # Initialize Monocle client (required)
+        self._monocle = MonocleClient()
+        if not await self._monocle.is_available():
+            raise RuntimeError(
+                "monocle is required but not found. "
+                "Install from: https://github.com/bgpkit/monocle"
+            )
+        self._output.display_info("✓ Monocle available (AS relationship data)")
 
         # Initialize AI backend (Claude)
         self._ai = ClaudeBackend(
