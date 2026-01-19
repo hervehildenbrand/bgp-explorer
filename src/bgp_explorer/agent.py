@@ -6,7 +6,7 @@ The agent coordinates between the AI backend, data sources, and output formattin
 import asyncio
 from typing import Optional
 
-from bgp_explorer.ai.base import AIBackend
+from bgp_explorer.ai.base import AIBackend, ChatCallback
 from bgp_explorer.ai.claude import ClaudeBackend
 from bgp_explorer.ai.gemini import GeminiBackend
 from bgp_explorer.ai.tools import BGPTools
@@ -116,7 +116,10 @@ class BGPExplorerAgent:
 
         # Initialize AI backend
         self._ai = self._create_ai_backend()
-        self._output.display_info(f"✓ AI backend ready ({self._settings.ai_backend.value})")
+        backend_info = self._settings.ai_backend.value
+        if self._settings.ai_backend == AIBackendType.CLAUDE:
+            backend_info = f"claude/{self._settings.claude_model.value}"
+        self._output.display_info(f"✓ AI backend ready ({backend_info})")
 
         # Initialize and register tools
         self._tools = BGPTools(
@@ -151,16 +154,20 @@ class BGPExplorerAgent:
         elif self._settings.ai_backend == AIBackendType.CLAUDE:
             return ClaudeBackend(
                 api_key=self._settings.get_api_key(),
+                model=self._settings.claude_model.model_id,
                 system_prompt=self._settings.system_prompt,
             )
         else:
             raise ValueError(f"Unknown AI backend: {self._settings.ai_backend}")
 
-    async def chat(self, message: str) -> str:
+    async def chat(
+        self, message: str, on_event: Optional[ChatCallback] = None
+    ) -> str:
         """Process a user message and return the response.
 
         Args:
             message: User message.
+            on_event: Optional callback for live UI updates.
 
         Returns:
             AI response.
@@ -171,7 +178,7 @@ class BGPExplorerAgent:
         if not self._running or not self._ai:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
 
-        return await self._ai.chat(message)
+        return await self._ai.chat(message, on_event=on_event)
 
     async def handle_command(self, command: str) -> bool:
         """Handle special commands.

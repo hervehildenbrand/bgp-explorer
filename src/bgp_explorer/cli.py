@@ -8,7 +8,8 @@ import click
 from dotenv import load_dotenv
 
 from bgp_explorer.agent import BGPExplorerAgent
-from bgp_explorer.config import AIBackendType, OutputFormat, load_settings
+from bgp_explorer.ai.base import ChatEvent
+from bgp_explorer.config import AIBackendType, ClaudeModel, OutputFormat, load_settings
 from bgp_explorer.output import OutputFormatter
 
 
@@ -25,6 +26,12 @@ def cli():
     type=click.Choice(["gemini", "claude"]),
     default="gemini",
     help="AI backend to use",
+)
+@click.option(
+    "--model",
+    type=click.Choice(["haiku", "sonnet", "opus"]),
+    default="sonnet",
+    help="Claude model tier (default: sonnet). Only used when --backend=claude",
 )
 @click.option(
     "--api-key",
@@ -61,6 +68,7 @@ def cli():
 )
 def chat(
     backend: str,
+    model: str,
     api_key: Optional[str],
     bgp_radar_path: Optional[str],
     collectors: str,
@@ -84,6 +92,10 @@ def chat(
         "save_path": save_path,
         "refresh_peeringdb": refresh_peeringdb,
     }
+
+    # Handle Claude model (only relevant for Claude backend)
+    if backend == "claude":
+        settings_kwargs["claude_model"] = ClaudeModel(model)
 
     # Handle API key based on backend
     if api_key:
@@ -155,7 +167,16 @@ async def run_chat(settings, output: OutputFormatter) -> None:
                 output.display_user_input(user_input)
 
                 try:
-                    response = await agent.chat(user_input)
+                    with output.thinking_status("Thinking...") as status:
+                        # Event handler to update status during processing
+                        def handle_event(event: ChatEvent) -> None:
+                            if event.type == "tool_start":
+                                message = event.data.get("message", "Running tool...")
+                                output.update_status(status, message)
+                            elif event.type == "tool_end":
+                                output.update_status(status, "Thinking...")
+
+                        response = await agent.chat(user_input, on_event=handle_event)
                     output.display_response(response)
                 except Exception as e:
                     output.display_error(f"AI error: {e}")

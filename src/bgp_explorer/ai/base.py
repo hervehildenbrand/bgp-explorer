@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 
 class Role(str, Enum):
@@ -60,6 +60,17 @@ class Message:
         return d
 
 
+@dataclass
+class ChatEvent:
+    """Event emitted during chat processing for live UI updates."""
+
+    type: Literal["thinking", "tool_start", "tool_end", "text_delta", "complete", "error"]
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+ChatCallback = Callable[[ChatEvent], None]
+
+
 class AIBackend(ABC):
     """Abstract base class for AI backends.
 
@@ -70,7 +81,9 @@ class AIBackend(ABC):
     """
 
     @abstractmethod
-    async def chat(self, message: str) -> str:
+    async def chat(
+        self, message: str, on_event: Optional[ChatCallback] = None
+    ) -> str:
         """Send a message and get a response.
 
         This method handles the full tool execution loop:
@@ -81,6 +94,7 @@ class AIBackend(ABC):
 
         Args:
             message: User message.
+            on_event: Optional callback for live UI updates.
 
         Returns:
             Final text response from the AI.

@@ -8,7 +8,16 @@ from typing import Any, Callable, Optional, get_type_hints
 
 import anthropic
 
-from bgp_explorer.ai.base import AIBackend, Message, Role, ToolCall, ToolResult
+from bgp_explorer.ai.base import (
+    AIBackend,
+    ChatCallback,
+    ChatEvent,
+    Message,
+    Role,
+    ToolCall,
+    ToolResult,
+)
+from bgp_explorer.ai.tools import get_tool_status_message
 
 
 class ClaudeBackend(AIBackend):
@@ -105,6 +114,9 @@ class ClaudeBackend(AIBackend):
 
     def _python_type_to_json(self, python_type: type) -> str:
         """Convert Python type to JSON Schema type."""
+        import types
+        from typing import Union, get_args, get_origin
+
         type_map = {
             str: "string",
             int: "integer",
@@ -113,24 +125,49 @@ class ClaudeBackend(AIBackend):
             list: "array",
             dict: "object",
         }
-        # Handle Optional and other generic types
-        origin = getattr(python_type, "__origin__", None)
+
+        # Handle Union types (e.g., list[str] | None or Union[list[str], None])
+        # For Python 3.10+ union syntax (X | Y)
+        if isinstance(python_type, types.UnionType):
+            args = get_args(python_type)
+            # Filter out NoneType and use the first real type
+            non_none_types = [t for t in args if t is not type(None)]
+            if non_none_types:
+                python_type = non_none_types[0]
+
+        # Handle typing.Union (e.g., Union[list[str], None])
+        origin = get_origin(python_type)
+        if origin is Union:
+            args = get_args(python_type)
+            non_none_types = [t for t in args if t is not type(None)]
+            if non_none_types:
+                python_type = non_none_types[0]
+                origin = get_origin(python_type)
+
+        # Handle generic types like list[str], dict[str, int]
         if origin is not None:
             python_type = origin
 
         return type_map.get(python_type, "string")
 
-    async def chat(self, message: str) -> str:
+    async def chat(
+        self, message: str, on_event: Optional[ChatCallback] = None
+    ) -> str:
         """Send a message and get a response.
 
         Handles the tool execution loop automatically.
 
         Args:
             message: User message.
+            on_event: Optional callback for live UI updates.
 
         Returns:
             Final text response.
         """
+        # Emit thinking event
+        if on_event:
+            on_event(ChatEvent(type="thinking"))
+
         # Add user message to history
         self._history.append(Message(role=Role.USER, content=message))
 
@@ -174,7 +211,7 @@ class ClaudeBackend(AIBackend):
 
             if tool_calls and response.stop_reason == "tool_use":
                 # Execute tools and continue loop
-                tool_results = await self._execute_tools(tool_calls)
+                tool_results = await self._execute_tools(tool_calls, on_event)
 
                 # Add assistant message with tool calls
                 self._history.append(
@@ -194,15 +231,22 @@ class ClaudeBackend(AIBackend):
                 self._history.append(
                     Message(role=Role.ASSISTANT, content=response_text)
                 )
+                if on_event:
+                    on_event(ChatEvent(type="complete"))
                 return response_text
 
         return "Max iterations reached without final response."
 
-    async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
+    async def _execute_tools(
+        self,
+        tool_calls: list[ToolCall],
+        on_event: Optional[ChatCallback] = None,
+    ) -> list[ToolResult]:
         """Execute tool calls and return results.
 
         Args:
             tool_calls: List of tool calls to execute.
+            on_event: Optional callback for live UI updates.
 
         Returns:
             List of tool results.
@@ -210,6 +254,14 @@ class ClaudeBackend(AIBackend):
         results = []
 
         for tc in tool_calls:
+            # Emit tool_start event
+            if on_event:
+                status_msg = get_tool_status_message(tc.name, tc.arguments)
+                on_event(ChatEvent(
+                    type="tool_start",
+                    data={"tool": tc.name, "message": status_msg},
+                ))
+
             func = self._tools.get(tc.name)
             if func is None:
                 results.append(
@@ -218,6 +270,11 @@ class ClaudeBackend(AIBackend):
                         error=f"Unknown tool: {tc.name}",
                     )
                 )
+                if on_event:
+                    on_event(ChatEvent(
+                        type="tool_end",
+                        data={"tool": tc.name, "error": f"Unknown tool: {tc.name}"},
+                    ))
                 continue
 
             try:
@@ -233,10 +290,22 @@ class ClaudeBackend(AIBackend):
 
                 results.append(ToolResult(tool_call_id=tc.id, output=output))
 
+                # Emit tool_end event
+                if on_event:
+                    on_event(ChatEvent(
+                        type="tool_end",
+                        data={"tool": tc.name},
+                    ))
+
             except Exception as e:
                 results.append(
                     ToolResult(tool_call_id=tc.id, error=str(e))
                 )
+                if on_event:
+                    on_event(ChatEvent(
+                        type="tool_end",
+                        data={"tool": tc.name, "error": str(e)},
+                    ))
 
         return results
 

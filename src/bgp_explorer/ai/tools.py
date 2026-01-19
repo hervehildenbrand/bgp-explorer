@@ -18,6 +18,49 @@ from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
 
 
+# Human-readable status messages for tool execution
+TOOL_DESCRIPTIONS: dict[str, str] = {
+    "lookup_prefix": "Looking up prefix {prefix}...",
+    "get_asn_announcements": "Getting announcements for AS{asn}...",
+    "get_routing_history": "Fetching routing history for {resource}...",
+    "get_anomalies": "Checking for BGP anomalies...",
+    "get_rpki_status": "Validating RPKI for {prefix}...",
+    "analyze_as_path": "Analyzing AS paths for {prefix}...",
+    "compare_collectors": "Comparing collectors for {prefix}...",
+    "get_asn_details": "Getting details for AS{asn}...",
+    "ping_from_global": "Running ping to {target}...",
+    "traceroute_from_global": "Running traceroute to {target}...",
+    "get_ixps_for_asn": "Finding IXPs for AS{asn}...",
+    "get_networks_at_ixp": "Getting networks at {ixp}...",
+    "get_ixp_details": "Getting details for {ixp}...",
+    "get_as_peers": "Finding peers for AS{asn}...",
+    "get_as_upstreams": "Finding upstreams for AS{asn}...",
+    "get_as_downstreams": "Finding downstreams for AS{asn}...",
+    "check_as_relationship": "Checking relationship between AS{asn1} and AS{asn2}...",
+    "get_as_connectivity_summary": "Getting connectivity summary for AS{asn}...",
+}
+
+
+def get_tool_status_message(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Format human-readable status message for a tool call.
+
+    Args:
+        tool_name: Name of the tool being called.
+        arguments: Arguments passed to the tool.
+
+    Returns:
+        Human-readable status message.
+    """
+    template = TOOL_DESCRIPTIONS.get(tool_name)
+    if template:
+        try:
+            return template.format(**arguments)
+        except KeyError:
+            # If arguments don't match template, return generic message
+            return f"Running {tool_name}..."
+    return f"Running {tool_name}..."
+
+
 class BGPTools:
     """Collection of tools for querying BGP data.
 
@@ -573,10 +616,22 @@ class BGPTools:
         Uses the Globalping network to measure latency and reachability
         from multiple geographic locations.
 
+        IMPORTANT: If the user specifies a location (e.g., "from the US",
+        "from Germany"), you MUST pass the appropriate location filter.
+        If probes from the requested location are unavailable, report this
+        clearly and ask if they'd like to try from other locations.
+
         Args:
             target: IP address or hostname to ping.
-            locations: Optional list of locations (e.g., ["US", "Europe", "Asia"]).
-                      If not specified, uses a diverse global selection.
+            locations: List of locations to run probes from. Supports:
+                - Country codes: "US", "DE", "FR", "GB", "JP", "AU", etc.
+                - Country names: "United States", "Germany", "France", etc.
+                - Continent codes: "EU", "NA", "AS", "OC", "SA", "AF"
+                - Region names: "Europe", "North America", "Asia", etc.
+                Examples: ["US"] for United States only,
+                         ["US", "DE"] for US and Germany,
+                         ["Europe"] for all European probes.
+                If not specified, uses a diverse global selection.
 
         Returns:
             Ping results from multiple global vantage points.
@@ -631,6 +686,19 @@ class BGPTools:
 
             return "\n".join(summary)
 
+        except ValueError as e:
+            # ValueError is raised for probe availability issues - pass through the helpful message
+            error_msg = str(e)
+            if "No probes available" in error_msg:
+                requested = ", ".join(locations) if locations else "default locations"
+                return (
+                    f"**PROBE AVAILABILITY ERROR**\n\n"
+                    f"{error_msg}\n\n"
+                    f"The user requested probes from: {requested}\n\n"
+                    f"**You MUST ask the user** if they would like to try from a different location. "
+                    f"Suggest alternatives like Europe (DE, GB, FR), Asia (JP, SG), or use default global probes."
+                )
+            return f"Error performing global ping to {target}: {error_msg}"
         except Exception as e:
             return f"Error performing global ping to {target}: {str(e)}"
 
@@ -644,10 +712,22 @@ class BGPTools:
         Uses the Globalping network to trace the path to a target
         from multiple geographic locations.
 
+        IMPORTANT: If the user specifies a location (e.g., "from the US",
+        "from Germany"), you MUST pass the appropriate location filter.
+        If probes from the requested location are unavailable, report this
+        clearly and ask if they'd like to try from other locations.
+
         Args:
             target: IP address or hostname to trace.
-            locations: Optional list of locations (e.g., ["US", "Europe"]).
-                      If not specified, uses a diverse global selection.
+            locations: List of locations to run probes from. Supports:
+                - Country codes: "US", "DE", "FR", "GB", "JP", "AU", etc.
+                - Country names: "United States", "Germany", "France", etc.
+                - Continent codes: "EU", "NA", "AS", "OC", "SA", "AF"
+                - Region names: "Europe", "North America", "Asia", etc.
+                Examples: ["US"] for United States only,
+                         ["US", "DE"] for US and Germany,
+                         ["Europe"] for all European probes.
+                If not specified, uses a diverse global selection.
 
         Returns:
             Traceroute results showing paths from multiple vantage points.
@@ -708,6 +788,19 @@ class BGPTools:
 
             return "\n".join(summary)
 
+        except ValueError as e:
+            # ValueError is raised for probe availability issues - pass through the helpful message
+            error_msg = str(e)
+            if "No probes available" in error_msg:
+                requested = ", ".join(locations) if locations else "default locations"
+                return (
+                    f"**PROBE AVAILABILITY ERROR**\n\n"
+                    f"{error_msg}\n\n"
+                    f"The user requested probes from: {requested}\n\n"
+                    f"**You MUST ask the user** if they would like to try from a different location. "
+                    f"Suggest alternatives like Europe (DE, GB, FR), Asia (JP, SG), or use default global probes."
+                )
+            return f"Error performing global traceroute to {target}: {error_msg}"
         except Exception as e:
             return f"Error performing global traceroute to {target}: {str(e)}"
 

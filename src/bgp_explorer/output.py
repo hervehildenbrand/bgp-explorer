@@ -1,13 +1,15 @@
 """Output formatting and display utilities."""
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Generator, Optional
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.status import Status
 
 from bgp_explorer.config import OutputFormat
 
@@ -146,6 +148,34 @@ AI-powered assistant for BGP routing investigation.
             info: Info message.
         """
         self.console.print(f"[dim]{info}[/dim]")
+
+    @contextmanager
+    def thinking_status(
+        self, message: str = "Thinking..."
+    ) -> Generator[Status, None, None]:
+        """Show spinner with status message.
+
+        Args:
+            message: Initial status message to display.
+
+        Yields:
+            Rich Status object that can be updated.
+        """
+        with Status(
+            f"[bold cyan]{message}[/bold cyan]",
+            console=self.console,
+            spinner="dots",
+        ) as status:
+            yield status
+
+    def update_status(self, status: Status, message: str) -> None:
+        """Update status message.
+
+        Args:
+            status: Rich Status object from thinking_status().
+            message: New status message.
+        """
+        status.update(f"[bold cyan]{message}[/bold cyan]")
 
     def export_conversation(self, path: Optional[str] = None) -> str:
         """Export conversation to JSON file.
