@@ -14,11 +14,10 @@ from bgp_explorer.config import (
 
 
 class TestClaudeModel:
-    """Tests for ClaudeModel enum."""
+    """Tests for ClaudeModel enum.
 
-    def test_haiku_value(self):
-        """Test Haiku enum value."""
-        assert ClaudeModel.HAIKU.value == "haiku"
+    Note: Only Sonnet and Opus are supported as they have extended thinking capability.
+    """
 
     def test_sonnet_value(self):
         """Test Sonnet enum value."""
@@ -27,10 +26,6 @@ class TestClaudeModel:
     def test_opus_value(self):
         """Test Opus enum value."""
         assert ClaudeModel.OPUS.value == "opus"
-
-    def test_model_id_haiku(self):
-        """Test Haiku model ID."""
-        assert ClaudeModel.HAIKU.model_id == "claude-haiku-4-5-20251215"
 
     def test_model_id_sonnet(self):
         """Test Sonnet model ID."""
@@ -121,11 +116,11 @@ class TestLoadSettings:
     def test_load_with_overrides(self):
         """Test load_settings with overrides."""
         settings = load_settings(
-            claude_model=ClaudeModel.HAIKU,
+            claude_model=ClaudeModel.OPUS,
             collectors=["rrc01", "rrc21"],
         )
 
-        assert settings.claude_model == ClaudeModel.HAIKU
+        assert settings.claude_model == ClaudeModel.OPUS
         assert settings.collectors == ["rrc01", "rrc21"]
 
     def test_load_with_none_values(self):

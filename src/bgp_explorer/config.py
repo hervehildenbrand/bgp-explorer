@@ -10,9 +10,9 @@ class ClaudeModel(str, Enum):
     """Supported Claude model tiers.
 
     Maps to actual model IDs used by the Anthropic API.
+    Note: Only Sonnet and Opus support extended thinking, which is required.
     """
 
-    HAIKU = "haiku"
     SONNET = "sonnet"
     OPUS = "opus"
 
@@ -20,7 +20,6 @@ class ClaudeModel(str, Enum):
     def model_id(self) -> str:
         """Get the actual model ID for the API."""
         model_ids = {
-            ClaudeModel.HAIKU: "claude-haiku-4-5-20251215",
             ClaudeModel.SONNET: "claude-sonnet-4-5-20250929",
             ClaudeModel.OPUS: "claude-opus-4-5-20251124",
         }
@@ -58,7 +57,7 @@ class Settings(BaseSettings):
     )
     claude_model: ClaudeModel = Field(
         default=ClaudeModel.SONNET,
-        description="Claude model tier (haiku, sonnet, opus)",
+        description="Claude model tier (sonnet, opus) - both support extended thinking",
     )
 
     # bgp-radar Settings

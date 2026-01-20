@@ -430,9 +430,9 @@ def install_deps():
 @cli.command()
 @click.option(
     "--model",
-    type=click.Choice(["haiku", "sonnet", "opus"]),
+    type=click.Choice(["sonnet", "opus"]),
     default="sonnet",
-    help="Claude model tier (default: sonnet)",
+    help="Claude model tier (default: sonnet) - both support extended thinking",
 )
 @click.option(
     "--api-key",
