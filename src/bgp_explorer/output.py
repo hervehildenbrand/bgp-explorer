@@ -96,6 +96,7 @@ AI-powered assistant for BGP routing investigation.
 - `/monitor stop` - Stop monitoring
 - `/monitor status` - Check status and current filter
 - `/monitor filter [types]` - Change filter while running
+- `/thinking [budget]` - View or set AI thinking budget (1024-16000 tokens)
 - `/export [path]` - Export conversation to JSON
 - `/clear` - Clear conversation history
 - `/help` - Show this message
@@ -215,6 +216,7 @@ AI-powered assistant for BGP routing investigation.
         table.add_row("/monitor stop", "Stop monitoring")
         table.add_row("/monitor status", "Check monitoring status")
         table.add_row("/monitor filter [types]", "Change event filter")
+        table.add_row("/thinking [budget]", "View or set thinking budget (1024-16000)")
         table.add_row("/export [path]", "Export conversation to JSON")
         table.add_row("/clear", "Clear conversation history")
         table.add_row("/help", "Show full help message")

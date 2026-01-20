@@ -107,11 +107,13 @@ uv run bgp-explorer chat
 uv run bgp-explorer chat [OPTIONS]
 
 Options:
+  --model [sonnet|opus]      Claude model tier (default: sonnet)
   --api-key TEXT             API key for the AI backend
   --bgp-radar-path TEXT      Path to bgp-radar binary
   --collectors TEXT          Comma-separated list of RIS collectors (default: rrc00)
   --output [text|json|both]  Output format (default: text)
   --save PATH                Path to save conversation output
+  --thinking-budget INT      Max tokens for AI thinking (default: 8000, range: 1024-16000)
 ```
 
 ## What You Can Do
@@ -197,6 +199,7 @@ uv run bgp-explorer chat          # Start interactive chat
 - `/monitor start` - Start real-time BGP monitoring
 - `/monitor stop` - Stop monitoring
 - `/monitor status` - Check monitoring status
+- `/thinking [budget]` - View or set AI thinking budget (1024-16000 tokens)
 - `/export [path]` - Export conversation to JSON
 - `/clear` - Clear conversation history
 - `/help` - Show help message

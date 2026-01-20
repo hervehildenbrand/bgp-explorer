@@ -27,6 +27,7 @@ class CommandCompleter:
             "status": [],
             "filter": ["hijack", "leak", "blackhole"],
         },
+        "thinking": [],  # /thinking [budget] - set thinking budget
         "export": [],
         "clear": [],
         "help": [],
@@ -467,6 +468,12 @@ def install_deps():
     is_flag=True,
     help="Force refresh of PeeringDB data from CAIDA",
 )
+@click.option(
+    "--thinking-budget",
+    type=int,
+    default=8000,
+    help="Max tokens for AI thinking (default: 8000, range: 1024-16000)",
+)
 def chat(
     model: str,
     api_key: str | None,
@@ -475,6 +482,7 @@ def chat(
     output_format: str,
     save_path: str | None,
     refresh_peeringdb: bool,
+    thinking_budget: int,
 ):
     """Start an interactive chat session."""
     # Load environment variables from .env file
@@ -482,6 +490,11 @@ def chat(
 
     # Parse collectors
     collector_list = [c.strip() for c in collectors.split(",")]
+
+    # Validate thinking budget
+    if thinking_budget < 1024 or thinking_budget > 16000:
+        click.echo("Error: --thinking-budget must be between 1024 and 16000", err=True)
+        sys.exit(1)
 
     # Build settings
     settings_kwargs = {
@@ -492,6 +505,7 @@ def chat(
         "output_format": OutputFormat(output_format),
         "save_path": save_path,
         "refresh_peeringdb": refresh_peeringdb,
+        "thinking_budget": thinking_budget,
     }
 
     try:

@@ -88,7 +88,7 @@ class Settings(BaseSettings):
 
     # AI Thinking Settings
     thinking_budget: int = Field(
-        default=16000,
+        default=8000,
         description="Maximum tokens for extended thinking (Claude uses what it needs)",
     )
     max_tokens: int = Field(

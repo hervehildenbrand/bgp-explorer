@@ -346,12 +346,17 @@ def evaluate_scenario(
     return True, None
 
 
-def generate_report(results: list[TestResult], model: str = "sonnet") -> str:
+def generate_report(
+    results: list[TestResult],
+    model: str = "sonnet",
+    thinking_budget: int = 16000,
+) -> str:
     """Generate markdown report from test results.
 
     Args:
         results: List of test results.
         model: The Claude model used for testing.
+        thinking_budget: The thinking budget used for testing.
 
     Returns:
         Markdown formatted report string.
@@ -366,6 +371,8 @@ def generate_report(results: list[TestResult], model: str = "sonnet") -> str:
         f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         "",
         f"**Model:** Claude {model.upper()}",
+        "",
+        f"**Thinking Budget:** {thinking_budget:,} tokens",
         "",
         "## Summary",
         "",
@@ -531,6 +538,8 @@ async def main():
     parser.add_argument("--category", help="Run specific category (1-7)")
     parser.add_argument("--model", choices=["sonnet", "opus"], default="sonnet",
                        help="Claude model to use (default: sonnet) - both support extended thinking")
+    parser.add_argument("--thinking-budget", type=int, default=16000,
+                       help="Thinking budget in tokens (default: 16000)")
     parser.add_argument("--output", default="specs/ai-reasoning-test-report.md",
                        help="Output report path")
     args = parser.parse_args()
@@ -549,15 +558,21 @@ async def main():
             print(f"Category {cat_num} not found")
             sys.exit(1)
 
-    # Load settings with model override
+    # Load settings with model and thinking budget override
     from bgp_explorer.config import ClaudeModel
     model_map = {
         "sonnet": ClaudeModel.SONNET,
         "opus": ClaudeModel.OPUS,
     }
-    settings = Settings(claude_model=model_map[args.model])
+    settings = Settings(
+        claude_model=model_map[args.model],
+        thinking_budget=args.thinking_budget,
+        max_tokens=max(args.thinking_budget + 16000, 32000),  # Ensure max_tokens > thinking_budget
+    )
 
-    print(f"Running {len(scenarios_to_run)} test scenario(s) with model: {args.model.upper()}")
+    print(f"Running {len(scenarios_to_run)} test scenario(s)")
+    print(f"  Model: {args.model.upper()}")
+    print(f"  Thinking Budget: {args.thinking_budget:,} tokens")
     print()
 
     results: list[TestResult] = []
@@ -574,7 +589,7 @@ async def main():
         print()
 
     # Generate report
-    report = generate_report(results, model=args.model)
+    report = generate_report(results, model=args.model, thinking_budget=args.thinking_budget)
 
     # Ensure output directory exists
     output_path = Path(args.output)

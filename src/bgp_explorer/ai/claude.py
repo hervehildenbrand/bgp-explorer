@@ -76,6 +76,14 @@ class ClaudeBackend(AIBackend):
         """Clear the conversation history."""
         self._history.clear()
 
+    def set_thinking_budget(self, budget: int) -> None:
+        """Set the thinking budget for extended thinking.
+
+        Args:
+            budget: New thinking budget in tokens (1024-16000).
+        """
+        self._thinking_budget = budget
+
     def register_tool(self, func: Callable[..., Any]) -> None:
         """Register a tool function.
 

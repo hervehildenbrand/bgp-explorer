@@ -128,6 +128,17 @@ class AIBackend(ABC):
         """Clear the conversation history."""
         pass
 
+    def set_thinking_budget(self, budget: int) -> None:  # noqa: B027
+        """Set the thinking budget for extended thinking.
+
+        Args:
+            budget: New thinking budget in tokens.
+
+        Note:
+            Not all backends support this. Default implementation does nothing.
+        """
+        pass
+
     @property
     @abstractmethod
     def history(self) -> list[Message]:

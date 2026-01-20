@@ -179,7 +179,50 @@ class BGPExplorerAgent:
             await self._handle_monitor_command(args)
             return True
 
+        elif cmd == "thinking":
+            self._handle_thinking_command(args)
+            return True
+
         return False
+
+    def _handle_thinking_command(self, args: str | None) -> None:
+        """Handle /thinking command to view or set thinking budget.
+
+        Args:
+            args: Optional new budget value (1024-16000).
+        """
+        if not self._ai:
+            self._output.display_error("AI backend not initialized.")
+            return
+
+        if not args:
+            # Show current budget
+            current = self._settings.thinking_budget
+            self._output.display_info(
+                f"Current thinking budget: {current:,} tokens\n"
+                f"Usage: /thinking <budget>  (range: 1024-16000)\n"
+                f"Example: /thinking 4000"
+            )
+            return
+
+        try:
+            new_budget = int(args.strip())
+            if new_budget < 1024 or new_budget > 16000:
+                self._output.display_error(
+                    "Thinking budget must be between 1024 and 16000 tokens."
+                )
+                return
+
+            # Update settings and AI backend
+            self._settings.thinking_budget = new_budget
+            self._ai.set_thinking_budget(new_budget)
+            self._output.display_info(
+                f"Thinking budget updated to {new_budget:,} tokens"
+            )
+        except ValueError:
+            self._output.display_error(
+                f"Invalid budget value: '{args}'. Must be a number between 1024 and 16000."
+            )
 
     async def _handle_monitor_command(self, args: str | None) -> None:
         """Handle /monitor subcommands.
