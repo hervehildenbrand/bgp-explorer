@@ -9,6 +9,8 @@
 
 AI-powered CLI for querying live and historical internet routing data using natural language.
 
+![BGP Explorer Demo](demo/output/bgp-explorer-github.gif)
+
 ## Features
 
 - **Natural Language Queries**: Ask questions about BGP routing in plain English

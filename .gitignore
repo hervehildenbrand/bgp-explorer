@@ -56,3 +56,7 @@ specs/
 # Linting/typing caches
 .mypy_cache/
 .ruff_cache/
+
+# Demo files (keep output/ for published videos)
+demo/*.tape
+demo/README.md
