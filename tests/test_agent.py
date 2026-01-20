@@ -183,10 +183,14 @@ class TestAgentInitialization:
             mock_bgp_radar.set_event_callback.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_initialization_fails_when_bgp_radar_not_available(self, settings, output):
-        """Test that initialization fails when bgp-radar is not available."""
+    async def test_initialization_succeeds_without_bgp_radar(self, settings, output):
+        """Test that initialization succeeds when bgp-radar is not available."""
         with patch("bgp_explorer.agent.BgpRadarClient") as MockBgpRadar, \
-             patch("bgp_explorer.agent.RipeStatClient") as MockRipeStat:
+             patch("bgp_explorer.agent.RipeStatClient") as MockRipeStat, \
+             patch("bgp_explorer.agent.GlobalpingClient") as MockGlobalping, \
+             patch("bgp_explorer.agent.PeeringDBClient") as MockPeeringDB, \
+             patch("bgp_explorer.agent.MonocleClient") as MockMonocle, \
+             patch("bgp_explorer.agent.ClaudeBackend") as MockClaude:
 
             # Setup mocks - bgp-radar not available
             mock_bgp_radar = AsyncMock()
@@ -196,11 +200,31 @@ class TestAgentInitialization:
             mock_ripe_stat = AsyncMock()
             MockRipeStat.return_value = mock_ripe_stat
 
+            mock_globalping = AsyncMock()
+            MockGlobalping.return_value = mock_globalping
+
+            mock_peeringdb = AsyncMock()
+            MockPeeringDB.return_value = mock_peeringdb
+
+            mock_monocle = AsyncMock()
+            mock_monocle.is_available = AsyncMock(return_value=True)
+            MockMonocle.return_value = mock_monocle
+
+            mock_claude = MagicMock()
+            mock_claude.register_tool = MagicMock()
+            MockClaude.return_value = mock_claude
+
             agent = BGPExplorerAgent(settings=settings, output=output)
 
-            # Should raise RuntimeError when bgp-radar is not available
-            with pytest.raises(RuntimeError, match="bgp-radar"):
-                await agent.initialize()
+            # Should succeed even without bgp-radar
+            await agent.initialize()
+
+            # Verify bgp-radar is None
+            assert agent._bgp_radar is None
+
+            # Verify warning was displayed
+            call_args = [str(call) for call in output.display_info.call_args_list]
+            assert any("bgp-radar not found" in arg for arg in call_args)
 
     @pytest.mark.asyncio
     async def test_initialization_fails_when_monocle_not_available(self, settings, output):

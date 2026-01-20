@@ -59,21 +59,22 @@ class BGPExplorerAgent:
         await self._ripe_stat.connect()
         self._output.display_info("✓ Connected to RIPE Stat")
 
-        # Initialize bgp-radar client (required)
-        self._bgp_radar = BgpRadarClient(
+        # Initialize bgp-radar client (optional - for real-time monitoring)
+        bgp_radar = BgpRadarClient(
             binary_path=self._settings.bgp_radar_path,
             collectors=self._settings.collectors,
         )
-        if not await self._bgp_radar.is_available():
-            raise RuntimeError(
-                "bgp-radar is required but not found. "
-                "Install with: go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest"
+        if await bgp_radar.is_available():
+            self._bgp_radar = bgp_radar
+            # Wire up event callback for real-time display
+            self._bgp_radar.set_event_callback(self._on_bgp_event)
+            self._output.display_info(
+                "✓ bgp-radar available (use /monitor start or ask to begin monitoring)"
             )
-        # Wire up event callback for real-time display
-        self._bgp_radar.set_event_callback(self._on_bgp_event)
-        self._output.display_info(
-            "✓ bgp-radar available (use /monitor start or ask to begin monitoring)"
-        )
+        else:
+            self._output.display_info(
+                "⚠ bgp-radar not found - real-time monitoring unavailable"
+            )
 
         # Initialize Globalping client (optional)
         try:

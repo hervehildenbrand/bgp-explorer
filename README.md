@@ -50,10 +50,12 @@ uv run bgp-explorer chat          # All 23 tools ready!
 
 The `install-deps` command automatically installs:
 
-- **Go** (if missing) - Downloads and extracts to `~/.local/go`
 - **Rust** (if missing) - Installs via rustup
-- **bgp-radar** - Real-time BGP anomaly detection (`go install`)
-- **monocle** - AS relationship data from BGPKIT (`cargo install`)
+- **monocle** (required) - AS relationship data from BGPKIT (`cargo install`)
+- **Go** (if missing) - Downloads and extracts to `~/.local/go`
+- **bgp-radar** (optional) - Real-time BGP anomaly detection (`go install`)
+
+**Note:** The app works without bgp-radar installed. Real-time monitoring (`/monitor start`, `get_anomalies` tool) requires bgp-radar. On-demand hijack detection (`check_prefix_anomalies` tool) works without it.
 
 Binaries are auto-detected in `~/go/bin` and `~/.cargo/bin`.
 
@@ -62,11 +64,11 @@ Binaries are auto-detected in `~/go/bin` and `~/.cargo/bin`.
 If you prefer to install dependencies manually:
 
 ```bash
-# bgp-radar (requires Go)
-go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest
-
-# monocle (requires Rust)
+# monocle (required - requires Rust)
 cargo install monocle
+
+# bgp-radar (optional - requires Go, for real-time monitoring)
+go install github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest
 ```
 
 ### Optional Dependencies
