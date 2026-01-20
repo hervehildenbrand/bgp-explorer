@@ -474,16 +474,25 @@ class ClaudeBackend(AIBackend):
         """
         messages = []
 
-        for msg in self._history:
+        # Find the index of the last user message to determine current turn
+        # Thinking blocks are only needed for the current turn (after last user message)
+        # to reduce token costs on historical messages
+        last_user_idx = -1
+        for i, msg in enumerate(self._history):
+            if msg.role == Role.USER:
+                last_user_idx = i
+
+        for idx, msg in enumerate(self._history):
             if msg.role == Role.USER:
                 messages.append({"role": "user", "content": msg.content})
 
             elif msg.role == Role.ASSISTANT:
                 content = []
 
-                # Add thinking blocks first (required by API when thinking is enabled)
-                # Note: Only include blocks with valid signatures (streaming may not provide them)
-                if msg.thinking_blocks:
+                # Only include thinking blocks for current turn (after last user message)
+                # This significantly reduces token costs for multi-turn conversations
+                is_current_turn = idx > last_user_idx
+                if is_current_turn and msg.thinking_blocks:
                     for tb in msg.thinking_blocks:
                         if tb.signature:  # Signature is required by API
                             content.append({
