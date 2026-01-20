@@ -28,6 +28,7 @@ AI-powered CLI for querying live and historical internet routing data using natu
 - **Path Analysis**: AS path diversity, upstream/downstream relationships, prepending detection
 - **RPKI Validation**: Check route origin validation status
 - **Anomaly Detection**: Real-time hijack, route leak, and blackhole detection
+- **On-Demand Hijack Detection**: Check any prefix for potential hijacks without bgp-radar (MOAS, RPKI, origin changes)
 
 ## Quick Start
 
@@ -36,7 +37,7 @@ git clone https://github.com/hervehildenbrand/bgp-explorer.git
 cd bgp-explorer
 uv sync
 uv run bgp-explorer install-deps  # Auto-installs Go + Rust + binaries
-uv run bgp-explorer chat          # All 22 tools ready!
+uv run bgp-explorer chat          # All 23 tools ready!
 ```
 
 ## Prerequisites
@@ -137,6 +138,7 @@ Options:
 > Check RPKI status for 1.1.1.0/24 from AS13335
 > Are there any BGP hijacks right now?
 > Show me recent route leaks
+> Check if 203.0.113.0/24 is being hijacked
 ```
 
 ### Global Network Testing
@@ -166,7 +168,7 @@ Options:
 > Should we peer with AS64496?
 ```
 
-## Available Tools (22 total)
+## Available Tools (23 total)
 
 | Tool | Description |
 |------|-------------|
@@ -177,6 +179,7 @@ Options:
 | `analyze_as_path` | Path diversity, upstream providers, transit ASNs, prepending detection |
 | `compare_collectors` | Compare routing views across collectors, detect inconsistencies |
 | `get_rpki_status` | RPKI validation (valid/invalid/not-found) |
+| `check_prefix_anomalies` | On-demand hijack detection (MOAS, RPKI, origin changes, visibility) |
 | `get_anomalies` | Real-time BGP anomalies from bgp-radar |
 | `ping_from_global` | Ping from worldwide vantage points |
 | `traceroute_from_global` | Traceroute from multiple locations |

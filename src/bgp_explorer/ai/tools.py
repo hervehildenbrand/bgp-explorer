@@ -5,7 +5,7 @@ by the AI to query BGP data sources.
 """
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
@@ -41,6 +41,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "get_network_contacts": "Looking up contacts for AS{asn}...",
     "start_monitoring": "Starting BGP anomaly monitoring...",
     "stop_monitoring": "Stopping BGP anomaly monitoring...",
+    "check_prefix_anomalies": "Checking {prefix} for hijack indicators...",
 }
 
 
@@ -113,6 +114,7 @@ class BGPTools:
             self.analyze_as_path,
             self.compare_collectors,
             self.get_asn_details,
+            self.check_prefix_anomalies,
         ]
         # Add bgp-radar monitoring tools if available
         if self._bgp_radar:
@@ -1444,3 +1446,191 @@ class BGPTools:
 
         except Exception as e:
             return f"Error stopping monitoring: {str(e)}"
+
+    async def check_prefix_anomalies(self, prefix: str) -> str:
+        """Check a prefix for potential hijack indicators using RIPE Stat.
+
+        This tool provides on-demand anomaly detection WITHOUT requiring bgp-radar.
+        It checks multiple indicators that may suggest a BGP hijack or misconfiguration:
+
+        1. **MOAS Detection**: Multiple Origin AS - if more than one AS is announcing
+           the same prefix, it could indicate a hijack.
+        2. **RPKI Validation**: Checks if the announcement is covered by a valid ROA.
+           Invalid status strongly suggests unauthorized announcement.
+        3. **Origin Change Detection**: Looks for recent changes in the originating ASN.
+        4. **Visibility Analysis**: Checks how many collectors see the prefix.
+
+        Use this tool when:
+        - Investigating a suspected hijack
+        - Validating prefix ownership before peering
+        - Checking if a prefix has anomalous routing behavior
+        - The user asks to "check for hijacks" or "verify a prefix"
+
+        Args:
+            prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24").
+
+        Returns:
+            Analysis with risk level (low/medium/high) and detailed indicators.
+        """
+        try:
+            indicators: dict[str, Any] = {}
+            risk_factors: list[str] = []
+
+            # Step 1: Get current BGP state for MOAS and visibility
+            routes = await self._ripe_stat.get_bgp_state(prefix)
+
+            if not routes:
+                return (
+                    f"**Prefix Anomaly Check: {prefix}**\n\n"
+                    f"**Status:** Not routed\n\n"
+                    f"No routes found for this prefix. The prefix may not be announced, "
+                    f"or may not be visible from RIPE RIS collectors.\n\n"
+                    f"This could indicate:\n"
+                    f"  - Prefix is not currently announced\n"
+                    f"  - Prefix was withdrawn (possible blackhole)\n"
+                    f"  - Filtering is preventing propagation"
+                )
+
+            # Analyze origins (MOAS detection)
+            origin_asns = list(set(r.origin_asn for r in routes))
+            collectors = list(set(r.collector for r in routes))
+
+            indicators["moas"] = {
+                "detected": len(origin_asns) > 1,
+                "origins": origin_asns,
+                "count": len(origin_asns),
+            }
+
+            if len(origin_asns) > 1:
+                risk_factors.append(f"MOAS: Multiple origins ({len(origin_asns)} ASes)")
+
+            # Visibility analysis
+            indicators["visibility"] = {
+                "collector_count": len(collectors),
+                "collectors": collectors[:10],  # Sample for output
+                "status": "normal" if len(collectors) >= 10 else "limited",
+            }
+
+            if len(collectors) < 5:
+                risk_factors.append(f"Low visibility: Only {len(collectors)} collectors")
+
+            # Step 2: RPKI validation for each origin
+            rpki_results = {}
+            for origin in origin_asns:
+                try:
+                    status = await self._ripe_stat.get_rpki_validation(prefix, origin)
+                    rpki_results[origin] = status
+                    if status == "invalid":
+                        risk_factors.append(f"RPKI Invalid: AS{origin} not authorized")
+                except Exception:
+                    rpki_results[origin] = "error"
+
+            indicators["rpki"] = rpki_results
+
+            # Step 3: Check routing history for recent origin changes
+            now = datetime.now(UTC)
+            week_ago = now - timedelta(days=7)
+
+            try:
+                history = await self._ripe_stat.get_routing_history(prefix, week_ago, now)
+                historical_origins = set()
+                for origin_data in history.get("by_origin", []):
+                    origin_str = origin_data.get("origin", "")
+                    if origin_str:
+                        try:
+                            historical_origins.add(int(origin_str))
+                        except ValueError:
+                            pass
+
+                # Check if current origins differ from historical
+                current_origins_set = set(origin_asns)
+                new_origins = current_origins_set - historical_origins
+                removed_origins = historical_origins - current_origins_set
+
+                indicators["origin_history"] = {
+                    "current_origins": list(current_origins_set),
+                    "historical_origins": list(historical_origins),
+                    "new_origins": list(new_origins),
+                    "removed_origins": list(removed_origins),
+                    "change_detected": bool(new_origins or removed_origins),
+                }
+
+                if new_origins:
+                    risk_factors.append(
+                        f"New origin(s) in last 7 days: {', '.join(f'AS{o}' for o in new_origins)}"
+                    )
+
+            except Exception:
+                indicators["origin_history"] = {"error": "Could not fetch history"}
+
+            # Calculate risk level
+            if any("RPKI Invalid" in rf for rf in risk_factors):
+                risk_level = "high"
+            elif len(risk_factors) >= 2:
+                risk_level = "high"
+            elif risk_factors:
+                risk_level = "medium"
+            else:
+                risk_level = "low"
+
+            # Build summary
+            summary = [
+                f"**Prefix Anomaly Check: {prefix}**",
+                "",
+                f"**Risk Level:** {'🔴 HIGH' if risk_level == 'high' else '🟡 MEDIUM' if risk_level == 'medium' else '🟢 LOW'}",
+                "",
+            ]
+
+            # MOAS section
+            if indicators["moas"]["detected"]:
+                summary.append("**⚠️ MOAS Detected (Multiple Origin AS)**")
+                summary.append(f"  Origins: {', '.join(f'AS{asn}' for asn in origin_asns)}")
+            else:
+                summary.append(f"**Single Origin:** AS{origin_asns[0]}")
+            summary.append("")
+
+            # RPKI section
+            summary.append("**RPKI Validation:**")
+            for origin, status in rpki_results.items():
+                status_emoji = {"valid": "✅", "invalid": "❌", "not-found": "❓"}.get(
+                    status, "⚠️"
+                )
+                summary.append(f"  - AS{origin}: {status_emoji} {status.upper()}")
+            summary.append("")
+
+            # Visibility section
+            vis = indicators["visibility"]
+            summary.append(f"**Visibility:** {vis['collector_count']} collectors")
+            if vis["status"] == "limited":
+                summary.append("  ⚠️ Limited visibility may indicate filtering or recent change")
+            summary.append("")
+
+            # Origin history section
+            if "error" not in indicators.get("origin_history", {}):
+                hist = indicators["origin_history"]
+                if hist["change_detected"]:
+                    summary.append("**⚠️ Recent Origin Changes (last 7 days):**")
+                    if hist["new_origins"]:
+                        summary.append(
+                            f"  - New: {', '.join(f'AS{o}' for o in hist['new_origins'])}"
+                        )
+                    if hist["removed_origins"]:
+                        summary.append(
+                            f"  - Removed: {', '.join(f'AS{o}' for o in hist['removed_origins'])}"
+                        )
+                else:
+                    summary.append("**Origin History:** Stable (no changes in last 7 days)")
+                summary.append("")
+
+            # Risk factors summary
+            if risk_factors:
+                summary.append("**Risk Factors:**")
+                for factor in risk_factors:
+                    summary.append(f"  - {factor}")
+            else:
+                summary.append("**No risk factors detected.** Prefix appears to be routing normally.")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error checking prefix anomalies for {prefix}: {str(e)}"

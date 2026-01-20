@@ -1,7 +1,7 @@
 """Tests for AI tools."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -40,7 +40,7 @@ class TestBGPTools:
                 origin_asn=15169,
                 as_path=[3356, 15169],
                 collector="rrc00",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source="ripe_stat",
             ),
             BGPRoute(
@@ -48,7 +48,7 @@ class TestBGPTools:
                 origin_asn=15169,
                 as_path=[174, 15169],
                 collector="rrc01",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source="ripe_stat",
             ),
         ]
@@ -123,7 +123,7 @@ class TestBGPTools:
                 severity=Severity.HIGH,
                 affected_prefix="8.8.8.0/24",
                 affected_asn=15169,
-                detected_at=datetime.now(timezone.utc),
+                detected_at=datetime.now(UTC),
             ),
         ]
         mock_bgp_radar.get_recent_anomalies.return_value = mock_events
@@ -416,3 +416,203 @@ class TestBGPToolsMonitoring:
 
         assert "start_monitoring" not in tool_names
         assert "stop_monitoring" not in tool_names
+
+
+class TestCheckPrefixAnomalies:
+    """Tests for check_prefix_anomalies tool."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        """Create a mock RIPE Stat client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def tools(self, mock_ripe_stat):
+        """Create BGPTools instance with mocked clients."""
+        return BGPTools(ripe_stat=mock_ripe_stat, bgp_radar=None)
+
+    @pytest.mark.asyncio
+    async def test_check_prefix_anomalies_normal(self, tools, mock_ripe_stat):
+        """Test checking a normal prefix with no anomalies."""
+        # Setup mock for single origin, RPKI valid
+        mock_routes = [
+            BGPRoute(
+                prefix="8.8.8.0/24",
+                origin_asn=15169,
+                as_path=[3356, 15169],
+                collector="rrc00",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+            BGPRoute(
+                prefix="8.8.8.0/24",
+                origin_asn=15169,
+                as_path=[174, 15169],
+                collector="rrc01",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+        ]
+        # Add more collectors for normal visibility
+        for i in range(10):
+            mock_routes.append(
+                BGPRoute(
+                    prefix="8.8.8.0/24",
+                    origin_asn=15169,
+                    as_path=[i, 15169],
+                    collector=f"rrc{i:02d}",
+                    timestamp=datetime.now(UTC),
+                    source="ripe_stat",
+                )
+            )
+
+        mock_ripe_stat.get_bgp_state.return_value = mock_routes
+        mock_ripe_stat.get_rpki_validation.return_value = "valid"
+        mock_ripe_stat.get_routing_history.return_value = {
+            "by_origin": [{"origin": "15169", "prefixes": []}]
+        }
+
+        result = await tools.check_prefix_anomalies("8.8.8.0/24")
+
+        assert "8.8.8.0/24" in result
+        assert "LOW" in result
+        assert "Single Origin" in result
+        assert "AS15169" in result
+        assert "valid" in result.lower()
+        assert "No risk factors" in result
+
+    @pytest.mark.asyncio
+    async def test_check_prefix_anomalies_moas(self, tools, mock_ripe_stat):
+        """Test detecting MOAS (Multiple Origin AS)."""
+        mock_routes = [
+            BGPRoute(
+                prefix="1.2.3.0/24",
+                origin_asn=12345,
+                as_path=[100, 12345],
+                collector="rrc00",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+            BGPRoute(
+                prefix="1.2.3.0/24",
+                origin_asn=67890,  # Different origin!
+                as_path=[200, 67890],
+                collector="rrc01",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+        ]
+
+        mock_ripe_stat.get_bgp_state.return_value = mock_routes
+        mock_ripe_stat.get_rpki_validation.return_value = "not-found"
+        mock_ripe_stat.get_routing_history.return_value = {"by_origin": []}
+
+        result = await tools.check_prefix_anomalies("1.2.3.0/24")
+
+        assert "MOAS Detected" in result
+        assert "Multiple Origin" in result
+        assert "AS12345" in result
+        assert "AS67890" in result
+        # Should have medium or high risk due to MOAS
+        assert "MEDIUM" in result or "HIGH" in result
+
+    @pytest.mark.asyncio
+    async def test_check_prefix_anomalies_rpki_invalid(self, tools, mock_ripe_stat):
+        """Test detecting RPKI invalid status (high risk)."""
+        mock_routes = [
+            BGPRoute(
+                prefix="1.2.3.0/24",
+                origin_asn=64496,
+                as_path=[100, 64496],
+                collector="rrc00",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+        ]
+        # Add collectors for normal visibility
+        for i in range(10):
+            mock_routes.append(
+                BGPRoute(
+                    prefix="1.2.3.0/24",
+                    origin_asn=64496,
+                    as_path=[i, 64496],
+                    collector=f"rrc{i:02d}",
+                    timestamp=datetime.now(UTC),
+                    source="ripe_stat",
+                )
+            )
+
+        mock_ripe_stat.get_bgp_state.return_value = mock_routes
+        mock_ripe_stat.get_rpki_validation.return_value = "invalid"
+        mock_ripe_stat.get_routing_history.return_value = {"by_origin": []}
+
+        result = await tools.check_prefix_anomalies("1.2.3.0/24")
+
+        assert "INVALID" in result
+        assert "HIGH" in result
+        assert "RPKI Invalid" in result
+
+    @pytest.mark.asyncio
+    async def test_check_prefix_anomalies_not_routed(self, tools, mock_ripe_stat):
+        """Test checking a prefix that is not routed."""
+        mock_ripe_stat.get_bgp_state.return_value = []
+
+        result = await tools.check_prefix_anomalies("192.0.2.0/24")
+
+        assert "Not routed" in result
+        assert "No routes found" in result
+
+    @pytest.mark.asyncio
+    async def test_check_prefix_anomalies_low_visibility(self, tools, mock_ripe_stat):
+        """Test detecting low visibility as a risk factor."""
+        mock_routes = [
+            BGPRoute(
+                prefix="1.2.3.0/24",
+                origin_asn=12345,
+                as_path=[100, 12345],
+                collector="rrc00",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+            BGPRoute(
+                prefix="1.2.3.0/24",
+                origin_asn=12345,
+                as_path=[200, 12345],
+                collector="rrc01",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+        ]
+
+        mock_ripe_stat.get_bgp_state.return_value = mock_routes
+        mock_ripe_stat.get_rpki_validation.return_value = "valid"
+        mock_ripe_stat.get_routing_history.return_value = {"by_origin": []}
+
+        result = await tools.check_prefix_anomalies("1.2.3.0/24")
+
+        assert "2 collectors" in result
+        assert "Low visibility" in result or "limited" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_check_prefix_anomalies_error(self, tools, mock_ripe_stat):
+        """Test error handling."""
+        mock_ripe_stat.get_bgp_state.side_effect = Exception("API error")
+
+        result = await tools.check_prefix_anomalies("8.8.8.0/24")
+
+        assert "Error" in result
+        assert "API error" in result
+
+    def test_check_prefix_anomalies_in_tools_list(self, tools):
+        """Test that check_prefix_anomalies is in the tools list."""
+        tool_funcs = tools.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "check_prefix_anomalies" in tool_names
+
+    def test_check_prefix_anomalies_has_docstring(self, tools):
+        """Test that check_prefix_anomalies has a proper docstring."""
+        assert tools.check_prefix_anomalies.__doc__ is not None
+        assert "hijack" in tools.check_prefix_anomalies.__doc__.lower()
+        assert "MOAS" in tools.check_prefix_anomalies.__doc__
+        assert "RPKI" in tools.check_prefix_anomalies.__doc__
