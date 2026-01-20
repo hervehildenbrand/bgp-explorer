@@ -1,11 +1,9 @@
 """Tests for AS relationship data models."""
 
-import pytest
-
 from bgp_explorer.models.as_relationship import (
-    ASRelationship,
-    ASNeighbor,
     ASConnectivity,
+    ASNeighbor,
+    ASRelationship,
 )
 
 
@@ -150,14 +148,22 @@ class TestASRelationship:
     def test_relationship_equality(self):
         """Test ASRelationship equality comparison."""
         rel1 = ASRelationship(
-            asn1=47957, asn2=45666, asn2_name=None,
-            connected_pct=47.7, peer_pct=17.6,
-            as1_upstream_pct=30.1, as2_upstream_pct=0.0,
+            asn1=47957,
+            asn2=45666,
+            asn2_name=None,
+            connected_pct=47.7,
+            peer_pct=17.6,
+            as1_upstream_pct=30.1,
+            as2_upstream_pct=0.0,
         )
         rel2 = ASRelationship(
-            asn1=47957, asn2=45666, asn2_name=None,
-            connected_pct=47.7, peer_pct=17.6,
-            as1_upstream_pct=30.1, as2_upstream_pct=0.0,
+            asn1=47957,
+            asn2=45666,
+            asn2_name=None,
+            connected_pct=47.7,
+            peer_pct=17.6,
+            as1_upstream_pct=30.1,
+            as2_upstream_pct=0.0,
         )
         assert rel1 == rel2
 

@@ -242,10 +242,7 @@ class ASAnalyzer:
         if not asn_list:
             return set()
 
-        upstream_sets = [
-            self.get_upstream_providers(routes, asn)
-            for asn in asn_list
-        ]
+        upstream_sets = [self.get_upstream_providers(routes, asn) for asn in asn_list]
 
         if not upstream_sets:
             return set()

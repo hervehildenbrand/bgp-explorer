@@ -79,6 +79,7 @@ class ASRelationship:
         Returns:
             ASRelationship instance.
         """
+
         # Parse percentage strings like "47.7%" to float
         def parse_pct(value: str | float) -> float:
             if isinstance(value, (int, float)):
@@ -203,15 +204,9 @@ class ASConnectivity:
         peers_data = data.get("peers", {})
         downstreams_data = data.get("downstreams", {})
 
-        upstreams = [
-            ASNeighbor.from_dict(n) for n in upstreams_data.get("top", [])
-        ]
-        peers = [
-            ASNeighbor.from_dict(n) for n in peers_data.get("top", [])
-        ]
-        downstreams = [
-            ASNeighbor.from_dict(n) for n in downstreams_data.get("top", [])
-        ]
+        upstreams = [ASNeighbor.from_dict(n) for n in upstreams_data.get("top", [])]
+        peers = [ASNeighbor.from_dict(n) for n in peers_data.get("top", [])]
+        downstreams = [ASNeighbor.from_dict(n) for n in downstreams_data.get("top", [])]
 
         # Calculate total neighbors from counts
         total = (

@@ -59,8 +59,7 @@ class Message:
             d["content"] = self.content
         if self.tool_calls:
             d["tool_calls"] = [
-                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-                for tc in self.tool_calls
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in self.tool_calls
             ]
         if self.tool_results:
             d["tool_results"] = [
@@ -74,7 +73,9 @@ class Message:
 class ChatEvent:
     """Event emitted during chat processing for live UI updates."""
 
-    type: Literal["thinking", "thinking_summary", "tool_start", "tool_end", "text_delta", "complete", "error"]
+    type: Literal[
+        "thinking", "thinking_summary", "tool_start", "tool_end", "text_delta", "complete", "error"
+    ]
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -91,9 +92,7 @@ class AIBackend(ABC):
     """
 
     @abstractmethod
-    async def chat(
-        self, message: str, on_event: ChatCallback | None = None
-    ) -> str:
+    async def chat(self, message: str, on_event: ChatCallback | None = None) -> str:
         """Send a message and get a response.
 
         This method handles the full tool execution loop:

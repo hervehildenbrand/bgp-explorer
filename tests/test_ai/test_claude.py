@@ -1,10 +1,10 @@
 """Tests for Claude AI backend."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bgp_explorer.ai.base import Message, Role, ToolCall
+from bgp_explorer.ai.base import Message, Role
 from bgp_explorer.ai.claude import ClaudeBackend
 
 
@@ -19,13 +19,13 @@ class TestClaudeBackend:
 
     def test_init_with_api_key(self, mock_anthropic):
         """Test initialization with API key."""
-        backend = ClaudeBackend(api_key="test-key")
+        ClaudeBackend(api_key="test-key")
         mock_anthropic.Anthropic.assert_called_once_with(api_key="test-key")
 
     def test_init_from_env(self, mock_anthropic):
         """Test initialization from environment variable."""
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "env-key"}):
-            backend = ClaudeBackend()
+            ClaudeBackend()
             mock_anthropic.Anthropic.assert_called_once_with(api_key="env-key")
 
     def test_init_missing_api_key(self, mock_anthropic):

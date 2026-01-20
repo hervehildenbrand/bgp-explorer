@@ -241,10 +241,12 @@ class RipeStatClient(DataSource):
                     if value.startswith("AS"):
                         try:
                             asn = int(value[2:])
-                            results.append({
-                                "asn": asn,
-                                "description": label,
-                            })
+                            results.append(
+                                {
+                                    "asn": asn,
+                                    "description": label,
+                                }
+                            )
                         except ValueError:
                             continue
 

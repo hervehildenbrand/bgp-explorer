@@ -1,8 +1,6 @@
 """Tests for BGPRoute data model."""
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from bgp_explorer.models.route import BGPRoute
 
@@ -17,7 +15,7 @@ class TestBGPRoute:
             origin_asn=64496,
             as_path=[64496],
             collector="rrc00",
-            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             source="ripe_stat",
         )
         assert route.prefix == "192.0.2.0/24"
@@ -38,7 +36,7 @@ class TestBGPRoute:
             collector="rrc21",
             peer_ip="192.0.2.100",
             peer_asn=64496,
-            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             source="ris_live",
             rpki_status="valid",
         )
@@ -60,7 +58,7 @@ class TestBGPRoute:
             origin_asn=64496,
             as_path=[64496],
             collector="rrc00",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="ripe_stat",
         )
         assert route.next_hop is None
@@ -72,7 +70,7 @@ class TestBGPRoute:
 
     def test_route_to_dict(self):
         """Test converting route to dictionary."""
-        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         route = BGPRoute(
             prefix="192.0.2.0/24",
             origin_asn=64496,
@@ -104,7 +102,7 @@ class TestBGPRoute:
 
     def test_route_equality(self):
         """Test route equality comparison."""
-        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         route1 = BGPRoute(
             prefix="192.0.2.0/24",
             origin_asn=64496,
@@ -130,7 +128,7 @@ class TestBGPRoute:
             origin_asn=15169,
             as_path=[64496, 3356, 174, 15169],
             collector="rrc00",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="ripe_stat",
         )
         assert route.as_path_length == 4
@@ -142,7 +140,7 @@ class TestBGPRoute:
             origin_asn=64496,
             as_path=[64496],
             collector="rrc00",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="ripe_stat",
         )
         assert route.prefix == "2001:db8::/32"
@@ -155,7 +153,7 @@ class TestBGPRoute:
             origin_asn=64496,
             as_path=[64496],
             collector="rrc00",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="ripe_stat",
         )
         assert route.is_ipv6 is False

@@ -139,9 +139,7 @@ class TestBGPTools:
         mock_events = []
         mock_bgp_radar.get_recent_anomalies.return_value = mock_events
 
-        result = await tools.get_anomalies(
-            event_type="hijack", prefix="8.8.8.0/24", asn=15169
-        )
+        await tools.get_anomalies(event_type="hijack", prefix="8.8.8.0/24", asn=15169)
 
         mock_bgp_radar.get_recent_anomalies.assert_called_once()
         call_kwargs = mock_bgp_radar.get_recent_anomalies.call_args.kwargs
@@ -203,8 +201,16 @@ class TestBGPToolsWithPeeringDB:
 
         # Setup mock data
         mock.get_ixps_for_asn.return_value = [
-            IXPPresence(asn=15169, ixp_id=31, ixp_name="AMS-IX", ipaddr4="80.249.208.1", speed=100000),
-            IXPPresence(asn=15169, ixp_id=26, ixp_name="DE-CIX Frankfurt", ipaddr4="80.81.192.1", speed=100000),
+            IXPPresence(
+                asn=15169, ixp_id=31, ixp_name="AMS-IX", ipaddr4="80.249.208.1", speed=100000
+            ),
+            IXPPresence(
+                asn=15169,
+                ixp_id=26,
+                ixp_name="DE-CIX Frankfurt",
+                ipaddr4="80.81.192.1",
+                speed=100000,
+            ),
         ]
 
         mock.get_networks_at_ixp.return_value = [
@@ -252,7 +258,11 @@ class TestBGPToolsWithPeeringDB:
 
         result = await tools_with_peeringdb.get_ixps_for_asn(99999)
 
-        assert "no ixp" in result.lower() or "not present" in result.lower() or "not found" in result.lower()
+        assert (
+            "no ixp" in result.lower()
+            or "not present" in result.lower()
+            or "not found" in result.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_get_networks_at_ixp(self, tools_with_peeringdb, mock_peeringdb):
@@ -358,7 +368,7 @@ class TestBGPToolsMonitoring:
         mock_bgp_radar.is_running = False
         mock_bgp_radar.start = AsyncMock()
 
-        result = await tools.start_monitoring(collectors=["rrc00", "rrc01"])
+        await tools.start_monitoring(collectors=["rrc00", "rrc01"])
 
         mock_bgp_radar.start.assert_called_once_with(collectors=["rrc00", "rrc01"])
 

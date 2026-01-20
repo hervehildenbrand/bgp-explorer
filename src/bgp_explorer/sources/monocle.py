@@ -44,11 +44,7 @@ class MonocleClient(DataSource):
             timeout: Command execution timeout in seconds.
             use_cache: If True, uses --no-refresh for faster cached results.
         """
-        self._binary_path = (
-            binary_path
-            or os.environ.get("MONOCLE_PATH")
-            or self._find_binary()
-        )
+        self._binary_path = binary_path or os.environ.get("MONOCLE_PATH") or self._find_binary()
         self._timeout = timeout
         self._use_cache = use_cache
 
@@ -184,7 +180,9 @@ class MonocleClient(DataSource):
 
         return relationships
 
-    async def get_as_peers(self, asn: int, min_visibility: float | None = None) -> list[ASRelationship]:
+    async def get_as_peers(
+        self, asn: int, min_visibility: float | None = None
+    ) -> list[ASRelationship]:
         """Get all peer relationships for an AS.
 
         Args:
@@ -198,7 +196,9 @@ class MonocleClient(DataSource):
             asn, min_visibility=min_visibility, relationship_filter="peer"
         )
 
-    async def get_as_upstreams(self, asn: int, min_visibility: float | None = None) -> list[ASRelationship]:
+    async def get_as_upstreams(
+        self, asn: int, min_visibility: float | None = None
+    ) -> list[ASRelationship]:
         """Get upstream providers for an AS.
 
         Args:
@@ -212,7 +212,9 @@ class MonocleClient(DataSource):
             asn, min_visibility=min_visibility, relationship_filter="upstream"
         )
 
-    async def get_as_downstreams(self, asn: int, min_visibility: float | None = None) -> list[ASRelationship]:
+    async def get_as_downstreams(
+        self, asn: int, min_visibility: float | None = None
+    ) -> list[ASRelationship]:
         """Get downstream customers of an AS.
 
         Args:
@@ -278,14 +280,9 @@ class MonocleClient(DataSource):
         max_peers = 0
         upstreams = summary.get("upstreams", {})
         if upstreams.get("top"):
-            max_peers = max(
-                n.get("peers_count", 0) for n in upstreams.get("top", [{}])
-            )
+            max_peers = max(n.get("peers_count", 0) for n in upstreams.get("top", [{}]))
         peers = summary.get("peers", {})
         if peers.get("top"):
-            max_peers = max(
-                max_peers,
-                max(n.get("peers_count", 0) for n in peers.get("top", [{}]))
-            )
+            max_peers = max(max_peers, max(n.get("peers_count", 0) for n in peers.get("top", [{}])))
 
         return ASConnectivity.from_dict(summary, asn, max_peers)

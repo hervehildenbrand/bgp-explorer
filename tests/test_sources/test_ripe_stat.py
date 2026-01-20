@@ -1,12 +1,10 @@
 """Tests for RIPE Stat REST client."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import UTC, datetime
 
 import pytest
 from aioresponses import aioresponses
 
-from bgp_explorer.models.route import BGPRoute
 from bgp_explorer.sources.ripe_stat import RipeStatClient
 
 
@@ -180,8 +178,8 @@ class TestRipeStatClient:
             async with client:
                 history = await client.get_routing_history(
                     "8.8.8.0/24",
-                    start=datetime(2020, 1, 1, tzinfo=timezone.utc),
-                    end=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    start=datetime(2020, 1, 1, tzinfo=UTC),
+                    end=datetime(2024, 1, 1, tzinfo=UTC),
                 )
 
             assert history["resource"] == "8.8.8.0/24"

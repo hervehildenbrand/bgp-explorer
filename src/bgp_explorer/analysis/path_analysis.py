@@ -131,39 +131,47 @@ class PathAnalyzer:
             if old_route and new_route:
                 # Check for origin change
                 if old_route.origin_asn != new_route.origin_asn:
-                    changes.append({
-                        "type": "origin_change",
-                        "collector": collector,
-                        "old_origin": old_route.origin_asn,
-                        "new_origin": new_route.origin_asn,
-                        "prefix": new_route.prefix,
-                    })
+                    changes.append(
+                        {
+                            "type": "origin_change",
+                            "collector": collector,
+                            "old_origin": old_route.origin_asn,
+                            "new_origin": new_route.origin_asn,
+                            "prefix": new_route.prefix,
+                        }
+                    )
 
                 # Check for path change
                 if old_route.as_path != new_route.as_path:
-                    changes.append({
-                        "type": "path_change",
-                        "collector": collector,
-                        "old_path": old_route.as_path,
-                        "new_path": new_route.as_path,
-                        "prefix": new_route.prefix,
-                    })
+                    changes.append(
+                        {
+                            "type": "path_change",
+                            "collector": collector,
+                            "old_path": old_route.as_path,
+                            "new_path": new_route.as_path,
+                            "prefix": new_route.prefix,
+                        }
+                    )
 
             elif old_route and not new_route:
-                changes.append({
-                    "type": "withdrawal",
-                    "collector": collector,
-                    "prefix": old_route.prefix,
-                    "origin": old_route.origin_asn,
-                })
+                changes.append(
+                    {
+                        "type": "withdrawal",
+                        "collector": collector,
+                        "prefix": old_route.prefix,
+                        "origin": old_route.origin_asn,
+                    }
+                )
 
             elif new_route and not old_route:
-                changes.append({
-                    "type": "announcement",
-                    "collector": collector,
-                    "prefix": new_route.prefix,
-                    "origin": new_route.origin_asn,
-                })
+                changes.append(
+                    {
+                        "type": "announcement",
+                        "collector": collector,
+                        "prefix": new_route.prefix,
+                        "origin": new_route.origin_asn,
+                    }
+                )
 
         return changes
 
@@ -183,13 +191,15 @@ class PathAnalyzer:
                 asn_counts = Counter(route.as_path)
                 for asn, count in asn_counts.items():
                     if count > 1:
-                        prepended.append({
-                            "prefix": route.prefix,
-                            "collector": route.collector,
-                            "asn": asn,
-                            "prepend_count": count,
-                            "path": route.as_path,
-                        })
+                        prepended.append(
+                            {
+                                "prefix": route.prefix,
+                                "collector": route.collector,
+                                "asn": asn,
+                                "prepend_count": count,
+                                "path": route.as_path,
+                            }
+                        )
                         break  # One prepend detection per route
         return prepended
 

@@ -1,7 +1,7 @@
 """Tests for enhanced AI tools (Phase 2)."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,7 +21,7 @@ class TestAnalyzeAsPath:
     @pytest.fixture
     def sample_routes(self):
         """Create sample routes for testing."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         return [
             BGPRoute(
                 prefix="8.8.8.0/24",
@@ -77,7 +77,7 @@ class TestAnalyzeAsPath:
     @pytest.mark.asyncio
     async def test_analyze_as_path_with_prepending(self, mock_ripe_stat):
         """Test path analysis detecting prepending."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         routes = [
             BGPRoute(
                 prefix="1.2.3.0/24",
@@ -117,7 +117,7 @@ class TestCompareCollectors:
     @pytest.fixture
     def consistent_routes(self):
         """Create routes with consistent origin."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         return [
             BGPRoute(
                 prefix="8.8.8.0/24",
@@ -140,7 +140,7 @@ class TestCompareCollectors:
     @pytest.fixture
     def inconsistent_routes(self):
         """Create routes with inconsistent origins (possible hijack)."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         return [
             BGPRoute(
                 prefix="1.2.3.0/24",
@@ -208,7 +208,7 @@ class TestGetAsnDetails:
     @pytest.mark.asyncio
     async def test_get_asn_details_success(self, mock_ripe_stat):
         """Test successful ASN details retrieval."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         mock_ripe_stat.get_announced_prefixes = AsyncMock(
             return_value=["8.8.8.0/24", "8.8.4.0/24", "2001:4860::/32"]
         )
@@ -247,7 +247,7 @@ class TestGetAsnDetails:
     @pytest.mark.asyncio
     async def test_get_asn_details_with_relationships(self, mock_ripe_stat):
         """Test ASN details including upstream/downstream relationships."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         mock_ripe_stat.get_announced_prefixes = AsyncMock(return_value=["8.8.8.0/24"])
         mock_ripe_stat.get_bgp_state = AsyncMock(
             return_value=[

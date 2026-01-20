@@ -94,7 +94,9 @@ class PeeringDBClient(DataSource):
             if force_refresh:
                 self._console.print("[cyan]Refreshing PeeringDB data from CAIDA...[/cyan]")
             else:
-                self._console.print("[yellow]PeeringDB cache is >7 days old, refreshing...[/yellow]")
+                self._console.print(
+                    "[yellow]PeeringDB cache is >7 days old, refreshing...[/yellow]"
+                )
 
         if need_refresh:
             try:
@@ -102,7 +104,9 @@ class PeeringDBClient(DataSource):
             except Exception as e:
                 # If download fails but we have cached data, use it
                 if self.cache_file.exists():
-                    self._console.print(f"[yellow]Download failed ({e}), using cached data[/yellow]")
+                    self._console.print(
+                        f"[yellow]Download failed ({e}), using cached data[/yellow]"
+                    )
                 else:
                     raise RuntimeError(f"Failed to download PeeringDB data: {e}") from e
 
@@ -145,10 +149,14 @@ class PeeringDBClient(DataSource):
         await self._download_file(dump_url, self.cache_file)
 
         # Save metadata
-        self.metadata_file.write_text(json.dumps({
-            "download_date": datetime.now(UTC).isoformat(),
-            "source_url": dump_url,
-        }))
+        self.metadata_file.write_text(
+            json.dumps(
+                {
+                    "download_date": datetime.now(UTC).isoformat(),
+                    "source_url": dump_url,
+                }
+            )
+        )
 
     async def _get_latest_dump_url(self) -> str:
         """Find the URL of the most recent PeeringDB dump.
@@ -178,7 +186,7 @@ class PeeringDBClient(DataSource):
 
                     html = await response.text()
                     # Find all dump files
-                    pattern = r'peeringdb_2_dump_\d{4}_\d{2}_\d{2}\.json'
+                    pattern = r"peeringdb_2_dump_\d{4}_\d{2}_\d{2}\.json"
                     matches = re.findall(pattern, html)
 
                     if matches:
@@ -425,8 +433,7 @@ class PeeringDBClient(DataSource):
         results = []
 
         for ixp in self._ixp_by_id.values():
-            if (query_lower in ixp.name.lower() or
-                query_lower in ixp.city.lower()):
+            if query_lower in ixp.name.lower() or query_lower in ixp.city.lower():
                 results.append(ixp)
 
         return results

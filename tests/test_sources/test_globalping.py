@@ -1,12 +1,9 @@
 """Tests for Globalping API client."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 from aioresponses import aioresponses
 
-from bgp_explorer.sources.globalping import GlobalpingClient, MeasurementResult, ProbeResult
+from bgp_explorer.sources.globalping import GlobalpingClient, ProbeResult
 
 
 class TestGlobalpingClient:
@@ -83,7 +80,9 @@ class TestGlobalpingClient:
             )
 
             async with client:
-                result = await client.ping("8.8.8.8", locations=[{"country": "DE"}, {"country": "US"}])
+                result = await client.ping(
+                    "8.8.8.8", locations=[{"country": "DE"}, {"country": "US"}]
+                )
 
             assert result.measurement_id == "test-measurement-id"
             assert result.status == "finished"
@@ -152,7 +151,11 @@ class TestGlobalpingClient:
                         "status": "finished",
                         "rawOutput": "mtr report...",
                         "hops": [
-                            {"hop": 1, "asn": [2516], "hosts": [{"ip": "10.0.0.1", "rtt": 2.0, "loss": 0}]},
+                            {
+                                "hop": 1,
+                                "asn": [2516],
+                                "hosts": [{"ip": "10.0.0.1", "rtt": 2.0, "loss": 0}],
+                            },
                         ],
                     },
                 },

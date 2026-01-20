@@ -1,8 +1,6 @@
 """Tests for IXP data models."""
 
-import pytest
-
-from bgp_explorer.models.ixp import IXP, Network, IXPPresence
+from bgp_explorer.models.ixp import IXP, IXPPresence, Network
 
 
 class TestIXP:

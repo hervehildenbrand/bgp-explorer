@@ -22,9 +22,7 @@ class TestMessage:
 
     def test_create_message_with_tool_calls(self):
         """Test creating a message with tool calls."""
-        tool_calls = [
-            ToolCall(id="1", name="lookup_prefix", arguments={"prefix": "8.8.8.0/24"})
-        ]
+        tool_calls = [ToolCall(id="1", name="lookup_prefix", arguments={"prefix": "8.8.8.0/24"})]
         msg = Message(role=Role.ASSISTANT, content=None, tool_calls=tool_calls)
         assert msg.tool_calls == tool_calls
 

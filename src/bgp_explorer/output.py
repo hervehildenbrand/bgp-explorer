@@ -128,7 +128,7 @@ AI-powered assistant for BGP routing investigation.
             top_line = f"[dim]{'─' * width}[/dim]"
 
         self.console.print(f"\n{top_line}")  # top line with optional badge
-        self.console.print("")                # empty line for input
+        self.console.print("")  # empty line for input
         self.console.print(f"[dim]{'─' * width}[/dim]")  # bottom line
         # Move cursor up 2 lines to the empty input line
         print("\033[2A", end="", flush=True)
@@ -151,11 +151,13 @@ AI-powered assistant for BGP routing investigation.
         Args:
             message: User message.
         """
-        self._conversation_log.append({
-            "role": "user",
-            "content": message,
-            "timestamp": datetime.now(UTC).isoformat(),
-        })
+        self._conversation_log.append(
+            {
+                "role": "user",
+                "content": message,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
 
         if self.format in (OutputFormat.TEXT, OutputFormat.BOTH):
             self.console.print(f"\n[bold blue]You:[/bold blue] {message}")
@@ -166,11 +168,13 @@ AI-powered assistant for BGP routing investigation.
         Args:
             response: AI response text.
         """
-        self._conversation_log.append({
-            "role": "assistant",
-            "content": response,
-            "timestamp": datetime.now(UTC).isoformat(),
-        })
+        self._conversation_log.append(
+            {
+                "role": "assistant",
+                "content": response,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
 
         if self.format in (OutputFormat.TEXT, OutputFormat.BOTH):
             self.console.print()
@@ -183,10 +187,14 @@ AI-powered assistant for BGP routing investigation.
             )
 
         if self.format == OutputFormat.JSON:
-            self.console.print_json(json.dumps({
-                "role": "assistant",
-                "content": response,
-            }))
+            self.console.print_json(
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "content": response,
+                    }
+                )
+            )
 
     def display_error(self, error: str) -> None:
         """Display error message.
@@ -253,6 +261,7 @@ AI-powered assistant for BGP routing investigation.
         Args:
             message: Status message to display.
         """
+
         def do_print():
             # Print status with cyan color
             self.console.print(f"[bold cyan]⠋ {message}[/bold cyan]")
@@ -269,6 +278,7 @@ AI-powered assistant for BGP routing investigation.
             summary: The extracted thinking summary.
             iteration: The current iteration number.
         """
+
         def do_print():
             self.console.print(f"[dim italic]Step {iteration}: {summary}[/dim italic]")
             # Also show the spinner below the step
@@ -283,6 +293,7 @@ AI-powered assistant for BGP routing investigation.
             content: Content to display.
             style: Optional Rich style.
         """
+
         def do_print():
             if style:
                 self.console.print(f"[{style}]{content}[/{style}]")
@@ -323,9 +334,7 @@ AI-powered assistant for BGP routing investigation.
             Severity.MEDIUM: ("yellow", "bold yellow"),
             Severity.LOW: ("green", "bold green"),
         }
-        border_style, title_style = severity_styles.get(
-            event.severity, ("white", "bold white")
-        )
+        border_style, title_style = severity_styles.get(event.severity, ("white", "bold white"))
 
         # Event type emoji
         type_emoji = {
@@ -363,7 +372,7 @@ AI-powered assistant for BGP routing investigation.
         # Move up past the input box (3 lines: top border, input, bottom border)
         # and clear those lines
         print("\033[3A", end="", flush=True)  # Move up 3 lines
-        print("\033[J", end="", flush=True)   # Clear from cursor to end of screen
+        print("\033[J", end="", flush=True)  # Clear from cursor to end of screen
 
         # Print the event panel
         self.console.print(
@@ -380,9 +389,7 @@ AI-powered assistant for BGP routing investigation.
         print("> ", end="", flush=True)
 
     @contextmanager
-    def thinking_status(
-        self, message: str = "Thinking..."
-    ) -> Generator[Status, None, None]:
+    def thinking_status(self, message: str = "Thinking...") -> Generator[Status, None, None]:
         """Show spinner with status message.
 
         Args:

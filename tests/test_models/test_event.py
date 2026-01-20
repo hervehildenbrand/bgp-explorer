@@ -1,8 +1,6 @@
 """Tests for BGPEvent data model."""
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from bgp_explorer.models.event import BGPEvent, EventType, Severity
 
@@ -17,7 +15,7 @@ class TestBGPEvent:
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
             affected_asn=15169,
-            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             details={"expected_origin": 15169, "observed_origin": 64496},
         )
         assert event.type == EventType.HIJACK
@@ -32,7 +30,7 @@ class TestBGPEvent:
             severity=Severity.MEDIUM,
             affected_prefix="1.1.1.0/24",
             affected_asn=13335,
-            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             details={"leaking_asn": 64496, "path": [64496, 3356, 13335]},
         )
         assert event.type == EventType.LEAK
@@ -45,7 +43,7 @@ class TestBGPEvent:
             severity=Severity.LOW,
             affected_prefix="192.0.2.0/24",
             affected_asn=64496,
-            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             details={"blackhole_community": "65535:666"},
         )
         assert event.type == EventType.BLACKHOLE
@@ -57,14 +55,14 @@ class TestBGPEvent:
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="192.0.2.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         assert event.affected_asn is None
         assert event.details == {}
 
     def test_event_to_dict(self):
         """Test converting event to dictionary."""
-        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         event = BGPEvent(
             type=EventType.HIJACK,
             severity=Severity.HIGH,
@@ -125,7 +123,7 @@ class TestBGPEvent:
 
     def test_event_equality(self):
         """Test event equality comparison."""
-        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         event1 = BGPEvent(
             type=EventType.HIJACK,
             severity=Severity.HIGH,

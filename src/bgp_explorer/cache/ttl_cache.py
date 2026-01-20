@@ -58,9 +58,7 @@ class TTLCache:
 
             return entry.value
 
-    async def set(
-        self, key: str, value: Any, ttl: timedelta | None = None
-    ) -> None:
+    async def set(self, key: str, value: Any, ttl: timedelta | None = None) -> None:
         """Set a value in the cache.
 
         Args:
@@ -113,11 +111,7 @@ class TTLCache:
         """
         async with self._lock:
             now = datetime.now(UTC)
-            expired_keys = [
-                key
-                for key, entry in self._cache.items()
-                if now > entry.expires_at
-            ]
+            expired_keys = [key for key, entry in self._cache.items() if now > entry.expires_at]
 
             for key in expired_keys:
                 del self._cache[key]

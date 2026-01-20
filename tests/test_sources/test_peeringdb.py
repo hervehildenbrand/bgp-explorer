@@ -2,16 +2,14 @@
 
 import json
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from aioresponses import aioresponses
 
-from bgp_explorer.models.ixp import IXP, IXPPresence, Network
 from bgp_explorer.sources.peeringdb import PeeringDBClient
-
 
 # Sample PeeringDB dump data for testing
 SAMPLE_PEERINGDB_DUMP = {
@@ -140,10 +138,14 @@ class TestPeeringDBClient:
 
         # Write metadata
         meta_file = temp_cache_dir / "metadata.json"
-        meta_file.write_text(json.dumps({
-            "download_date": datetime.now(timezone.utc).isoformat(),
-            "source_url": "https://example.com/dump.json",
-        }))
+        meta_file.write_text(
+            json.dumps(
+                {
+                    "download_date": datetime.now(UTC).isoformat(),
+                    "source_url": "https://example.com/dump.json",
+                }
+            )
+        )
 
         client = PeeringDBClient(cache_dir=temp_cache_dir)
         return client
@@ -336,11 +338,15 @@ class TestPeeringDBClient:
 
         # Write stale metadata (8 days old)
         meta_file = temp_cache_dir / "metadata.json"
-        stale_date = datetime.now(timezone.utc) - timedelta(days=8)
-        meta_file.write_text(json.dumps({
-            "download_date": stale_date.isoformat(),
-            "source_url": "https://example.com/dump.json",
-        }))
+        stale_date = datetime.now(UTC) - timedelta(days=8)
+        meta_file.write_text(
+            json.dumps(
+                {
+                    "download_date": stale_date.isoformat(),
+                    "source_url": "https://example.com/dump.json",
+                }
+            )
+        )
 
         client = PeeringDBClient(cache_dir=temp_cache_dir)
         assert client._is_cache_stale() is True
@@ -354,11 +360,15 @@ class TestPeeringDBClient:
 
         # Write fresh metadata (2 days old)
         meta_file = temp_cache_dir / "metadata.json"
-        fresh_date = datetime.now(timezone.utc) - timedelta(days=2)
-        meta_file.write_text(json.dumps({
-            "download_date": fresh_date.isoformat(),
-            "source_url": "https://example.com/dump.json",
-        }))
+        fresh_date = datetime.now(UTC) - timedelta(days=2)
+        meta_file.write_text(
+            json.dumps(
+                {
+                    "download_date": fresh_date.isoformat(),
+                    "source_url": "https://example.com/dump.json",
+                }
+            )
+        )
 
         client = PeeringDBClient(cache_dir=temp_cache_dir)
         assert client._is_cache_stale() is False
@@ -371,15 +381,19 @@ class TestPeeringDBClient:
         cache_file.write_text(json.dumps(SAMPLE_PEERINGDB_DUMP))
 
         meta_file = temp_cache_dir / "metadata.json"
-        meta_file.write_text(json.dumps({
-            "download_date": datetime.now(timezone.utc).isoformat(),
-            "source_url": "https://example.com/dump.json",
-        }))
+        meta_file.write_text(
+            json.dumps(
+                {
+                    "download_date": datetime.now(UTC).isoformat(),
+                    "source_url": "https://example.com/dump.json",
+                }
+            )
+        )
 
         client = PeeringDBClient(cache_dir=temp_cache_dir)
 
         # Mock the download
-        with patch.object(client, '_download_latest_dump', new_callable=AsyncMock) as mock_download:
+        with patch.object(client, "_download_latest_dump", new_callable=AsyncMock) as mock_download:
             mock_download.return_value = None
 
             await client.connect(force_refresh=True)
@@ -434,9 +448,9 @@ class TestPeeringDBClientDownload:
     @pytest.mark.asyncio
     async def test_get_latest_dump_url(self, client, temp_cache_dir):
         """Test finding the latest dump URL from CAIDA directory."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         year = now.year
         month = now.month
 

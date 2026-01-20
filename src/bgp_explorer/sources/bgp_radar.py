@@ -134,9 +134,7 @@ class BgpRadarClient(DataSource):
         """
         # Check if it's an absolute path
         if os.path.isabs(self._binary_path):
-            return os.path.isfile(self._binary_path) and os.access(
-                self._binary_path, os.X_OK
-            )
+            return os.path.isfile(self._binary_path) and os.access(self._binary_path, os.X_OK)
 
         # Check in PATH
         return shutil.which(self._binary_path) is not None

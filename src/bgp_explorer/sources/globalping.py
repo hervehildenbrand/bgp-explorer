@@ -376,10 +376,7 @@ class GlobalpingClient(DataSource):
 
         data = await self._get_results(measurement_id)
 
-        probes = [
-            ProbeResult.from_dict(r)
-            for r in data.get("results", [])
-        ]
+        probes = [ProbeResult.from_dict(r) for r in data.get("results", [])]
 
         return MeasurementResult(
             measurement_id=measurement_id,

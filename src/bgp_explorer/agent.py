@@ -3,7 +3,6 @@
 The agent coordinates between the AI backend, data sources, and output formatting.
 """
 
-
 from bgp_explorer.ai.base import AIBackend, ChatCallback
 from bgp_explorer.ai.claude import ClaudeBackend
 from bgp_explorer.ai.tools import BGPTools
@@ -72,9 +71,7 @@ class BGPExplorerAgent:
                 "✓ bgp-radar available (use /monitor start or ask to begin monitoring)"
             )
         else:
-            self._output.display_info(
-                "⚠ bgp-radar not found - real-time monitoring unavailable"
-            )
+            self._output.display_info("⚠ bgp-radar not found - real-time monitoring unavailable")
 
         # Initialize Globalping client (optional)
         try:
@@ -98,8 +95,7 @@ class BGPExplorerAgent:
         self._monocle = MonocleClient()
         if not await self._monocle.is_available():
             raise RuntimeError(
-                "monocle is required but not found. "
-                "Install from: https://github.com/bgpkit/monocle"
+                "monocle is required but not found. Install from: https://github.com/bgpkit/monocle"
             )
         self._output.display_info("✓ Monocle available (AS relationship data)")
 
@@ -111,7 +107,9 @@ class BGPExplorerAgent:
             thinking_budget=self._settings.thinking_budget,
             max_tokens=self._settings.max_tokens,
         )
-        self._output.display_info(f"✓ AI backend ready (claude/{self._settings.claude_model.value})")
+        self._output.display_info(
+            f"✓ AI backend ready (claude/{self._settings.claude_model.value})"
+        )
 
         # Initialize and register tools
         self._tools = BGPTools(
@@ -128,9 +126,7 @@ class BGPExplorerAgent:
         self._running = True
         self._output.display_info("")
 
-    async def chat(
-        self, message: str, on_event: ChatCallback | None = None
-    ) -> str:
+    async def chat(self, message: str, on_event: ChatCallback | None = None) -> str:
         """Process a user message and return the response.
 
         Args:
@@ -209,17 +205,13 @@ class BGPExplorerAgent:
         try:
             new_budget = int(args.strip())
             if new_budget < 1024 or new_budget > 16000:
-                self._output.display_error(
-                    "Thinking budget must be between 1024 and 16000 tokens."
-                )
+                self._output.display_error("Thinking budget must be between 1024 and 16000 tokens.")
                 return
 
             # Update settings and AI backend
             self._settings.thinking_budget = new_budget
             self._ai.set_thinking_budget(new_budget)
-            self._output.display_info(
-                f"Thinking budget updated to {new_budget:,} tokens"
-            )
+            self._output.display_info(f"Thinking budget updated to {new_budget:,} tokens")
         except ValueError:
             self._output.display_error(
                 f"Invalid budget value: '{args}'. Must be a number between 1024 and 16000."
@@ -245,7 +237,11 @@ class BGPExplorerAgent:
 
         # Parse event types from arguments
         def parse_event_types(type_names: list[str]) -> set[EventType]:
-            valid_types = {"hijack": EventType.HIJACK, "leak": EventType.LEAK, "blackhole": EventType.BLACKHOLE}
+            valid_types = {
+                "hijack": EventType.HIJACK,
+                "leak": EventType.LEAK,
+                "blackhole": EventType.BLACKHOLE,
+            }
             result = set()
             for name in type_names:
                 if name in valid_types:

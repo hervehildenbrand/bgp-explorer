@@ -1,6 +1,6 @@
 """Tests for path analysis module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ class TestPathAnalyzer:
     @pytest.fixture
     def sample_routes(self):
         """Create sample routes for testing."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         return [
             BGPRoute(
                 prefix="8.8.8.0/24",
@@ -92,8 +92,8 @@ class TestPathAnalyzer:
 
     def test_detect_path_changes(self):
         """Test detecting path changes between two route sets."""
-        ts1 = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
-        ts2 = datetime(2024, 1, 1, 13, 0, tzinfo=timezone.utc)
+        ts1 = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+        ts2 = datetime(2024, 1, 1, 13, 0, tzinfo=UTC)
 
         old_routes = [
             BGPRoute(
@@ -124,8 +124,8 @@ class TestPathAnalyzer:
 
     def test_detect_origin_change(self):
         """Test detecting origin ASN changes."""
-        ts1 = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
-        ts2 = datetime(2024, 1, 1, 13, 0, tzinfo=timezone.utc)
+        ts1 = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+        ts2 = datetime(2024, 1, 1, 13, 0, tzinfo=UTC)
 
         old_routes = [
             BGPRoute(
@@ -176,7 +176,7 @@ class TestPathAnalyzer:
             origin_asn=64496,
             as_path=[64496],
             collector="rrc00",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="ripe_stat",
         )
         analyzer = PathAnalyzer()

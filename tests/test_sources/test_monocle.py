@@ -6,11 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bgp_explorer.models.as_relationship import (
-    ASConnectivity,
-    ASRelationship,
-    ASNeighbor,
-)
 from bgp_explorer.sources.monocle import MonocleClient
 
 
@@ -425,9 +420,7 @@ class TestMonocleClient:
         async def mock_run(*args, **kwargs):
             mock_process = MagicMock()
             mock_process.returncode = 1
-            mock_process.communicate = AsyncMock(
-                return_value=(b"", b"Command failed")
-            )
+            mock_process.communicate = AsyncMock(return_value=(b"", b"Command failed"))
             return mock_process
 
         with patch("asyncio.create_subprocess_exec", mock_run):
@@ -441,9 +434,7 @@ class TestMonocleClient:
         async def mock_run(*args, **kwargs):
             mock_process = MagicMock()
             mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(
-                return_value=(b"not valid json", b"")
-            )
+            mock_process.communicate = AsyncMock(return_value=(b"not valid json", b""))
             return mock_process
 
         with patch("asyncio.create_subprocess_exec", mock_run):

@@ -2,11 +2,9 @@
 
 import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from bgp_explorer.config import OutputFormat
 from bgp_explorer.models.event import BGPEvent, EventType, Severity
@@ -159,6 +157,7 @@ class TestOutputFormatter:
         """Test exporting with default path generation."""
         with tempfile.TemporaryDirectory() as tmpdir:
             import os
+
             original_cwd = os.getcwd()
             try:
                 os.chdir(tmpdir)
@@ -332,7 +331,7 @@ class TestDisplayBgpEvent:
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
             affected_asn=15169,
-            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             details={"expected_origin": 15169, "observed_origin": 64496},
         )
 
@@ -343,6 +342,7 @@ class TestDisplayBgpEvent:
         # First call should be the Panel
         first_call_args = mock_console.print.call_args_list[0][0][0]
         from rich.panel import Panel
+
         assert isinstance(first_call_args, Panel)
 
     @patch("bgp_explorer.output.Console")
@@ -357,7 +357,7 @@ class TestDisplayBgpEvent:
             severity=Severity.MEDIUM,
             affected_prefix="1.1.1.0/24",
             affected_asn=13335,
-            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
         )
 
         formatter.display_bgp_event(event)
@@ -377,7 +377,7 @@ class TestDisplayBgpEvent:
             severity=Severity.LOW,
             affected_prefix="192.0.2.0/24",
             affected_asn=64496,
-            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
         )
 
         formatter.display_bgp_event(event)

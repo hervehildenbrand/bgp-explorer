@@ -1,23 +1,21 @@
 """Tests for BGPStream client."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Check if pybgpstream is available
 try:
-    import pybgpstream
+    import pybgpstream  # noqa: F401
+
     BGPSTREAM_AVAILABLE = True
 except ImportError:
     BGPSTREAM_AVAILABLE = False
 
 
 # Skip all tests if pybgpstream is not available
-pytestmark = pytest.mark.skipif(
-    not BGPSTREAM_AVAILABLE,
-    reason="pybgpstream not installed"
-)
+pytestmark = pytest.mark.skipif(not BGPSTREAM_AVAILABLE, reason="pybgpstream not installed")
 
 
 class TestBGPStreamClient:
@@ -171,8 +169,8 @@ class TestBGPStreamClient:
         mock_stream.records.return_value = [mock_rec]
 
         client = BGPStreamClient()
-        start = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2024, 1, 1, 1, 0, tzinfo=timezone.utc)
+        start = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
+        end = datetime(2024, 1, 1, 1, 0, tzinfo=UTC)
 
         routes = client.get_historical_updates(
             start_time=start,
@@ -221,8 +219,8 @@ class TestBGPStreamClient:
         mock_stream.records.return_value = [mock_rec]
 
         client = BGPStreamClient()
-        start = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2024, 1, 1, 1, 0, tzinfo=timezone.utc)
+        start = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
+        end = datetime(2024, 1, 1, 1, 0, tzinfo=UTC)
 
         events = client.get_prefix_events("8.8.8.0/24", start, end)
 
@@ -238,7 +236,6 @@ class TestBGPStreamNotAvailable:
         """Test that BGPStreamError is raised when not available."""
         with patch.dict("sys.modules", {"pybgpstream": None}):
             # Need to reload the module to pick up the patched import
-            import importlib
             from bgp_explorer.sources import bgpstream
 
             # Temporarily set BGPSTREAM_AVAILABLE to False

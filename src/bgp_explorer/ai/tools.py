@@ -118,33 +118,41 @@ class BGPTools:
         ]
         # Add bgp-radar monitoring tools if available
         if self._bgp_radar:
-            tools.extend([
-                self.start_monitoring,
-                self.stop_monitoring,
-            ])
+            tools.extend(
+                [
+                    self.start_monitoring,
+                    self.stop_monitoring,
+                ]
+            )
         # Add Globalping tools if available
         if self._globalping:
-            tools.extend([
-                self.ping_from_global,
-                self.traceroute_from_global,
-            ])
+            tools.extend(
+                [
+                    self.ping_from_global,
+                    self.traceroute_from_global,
+                ]
+            )
         # Add PeeringDB tools if available
         if self._peeringdb:
-            tools.extend([
-                self.get_ixps_for_asn,
-                self.get_networks_at_ixp,
-                self.get_ixp_details,
-                self.get_network_contacts,
-            ])
+            tools.extend(
+                [
+                    self.get_ixps_for_asn,
+                    self.get_networks_at_ixp,
+                    self.get_ixp_details,
+                    self.get_network_contacts,
+                ]
+            )
         # Add Monocle tools if available
         if self._monocle:
-            tools.extend([
-                self.get_as_peers,
-                self.get_as_upstreams,
-                self.get_as_downstreams,
-                self.check_as_relationship,
-                self.get_as_connectivity_summary,
-            ])
+            tools.extend(
+                [
+                    self.get_as_peers,
+                    self.get_as_upstreams,
+                    self.get_as_downstreams,
+                    self.check_as_relationship,
+                    self.get_as_connectivity_summary,
+                ]
+            )
         return tools
 
     async def search_asn(self, query: str) -> str:
@@ -169,7 +177,18 @@ class BGPTools:
             variations = [query]
 
             # Add common regional/legal suffixes
-            common_suffixes = ["Europe", "France", "US", "USA", "Corp", "Inc", "SA", "Ltd", "GmbH", "LLC"]
+            common_suffixes = [
+                "Europe",
+                "France",
+                "US",
+                "USA",
+                "Corp",
+                "Inc",
+                "SA",
+                "Ltd",
+                "GmbH",
+                "LLC",
+            ]
             for suffix in common_suffixes:
                 if suffix.lower() not in query.lower():
                     variations.append(f"{query} {suffix}")
@@ -269,7 +288,7 @@ class BGPTools:
             # Show up to 5 unique paths
             for i, path in enumerate(list(unique_paths)[:5]):
                 path_str = " → ".join(f"AS{asn}" for asn in path)
-                summary.append(f"  {i+1}. {path_str}")
+                summary.append(f"  {i + 1}. {path_str}")
 
             return "\n".join(summary)
 
@@ -762,9 +781,7 @@ class BGPTools:
                     summary.append("**Latency Summary:**")
                     summary.append(f"  - Min: {min(avg_latencies):.2f} ms")
                     summary.append(f"  - Max: {max(avg_latencies):.2f} ms")
-                    summary.append(
-                        f"  - Avg: {sum(avg_latencies) / len(avg_latencies):.2f} ms"
-                    )
+                    summary.append(f"  - Avg: {sum(avg_latencies) / len(avg_latencies):.2f} ms")
                     summary.append("")
 
             summary.append("**Results by Location:**")
@@ -860,7 +877,11 @@ class BGPTools:
                         hop_num = hop.get("hop", i)
 
                         # New format: resolvedHostname/resolvedAddress
-                        host = hop.get("resolvedHostname") or hop.get("resolvedAddress") or hop.get("host")
+                        host = (
+                            hop.get("resolvedHostname")
+                            or hop.get("resolvedAddress")
+                            or hop.get("host")
+                        )
 
                         # New format: timings array
                         timings = hop.get("timings", [])
@@ -920,7 +941,9 @@ class BGPTools:
             presences = self._peeringdb.get_ixps_for_asn(asn)
 
             if not presences:
-                return f"AS{asn} is not present at any IXPs in PeeringDB, or the ASN does not exist."
+                return (
+                    f"AS{asn} is not present at any IXPs in PeeringDB, or the ASN does not exist."
+                )
 
             summary = [
                 f"**AS{asn} IXP Presence**",
@@ -1171,9 +1194,7 @@ class BGPTools:
             sorted_peers = sorted(peers, key=lambda p: p.connected_pct, reverse=True)
             for peer in sorted_peers[:20]:
                 name_str = f" ({peer.asn2_name})" if peer.asn2_name else ""
-                summary.append(
-                    f"  - AS{peer.asn2}{name_str}: {peer.connected_pct:.1f}% visibility"
-                )
+                summary.append(f"  - AS{peer.asn2}{name_str}: {peer.connected_pct:.1f}% visibility")
 
             if len(peers) > 20:
                 summary.append(f"  ... and {len(peers) - 20} more peers")
@@ -1314,13 +1335,9 @@ class BGPTools:
                     f"AS{asn1} and AS{asn2} exchange traffic as peers (settlement-free peering)."
                 )
             elif rel_type == "upstream":
-                summary.append(
-                    f"AS{asn2} provides transit to AS{asn1} (AS{asn2} is a provider)."
-                )
+                summary.append(f"AS{asn2} provides transit to AS{asn1} (AS{asn2} is a provider).")
             elif rel_type == "downstream":
-                summary.append(
-                    f"AS{asn1} provides transit to AS{asn2} (AS{asn1} is a provider)."
-                )
+                summary.append(f"AS{asn1} provides transit to AS{asn2} (AS{asn1} is a provider).")
 
             return "\n".join(summary)
 
@@ -1368,9 +1385,7 @@ class BGPTools:
             summary.append(f"**Peers:** {len(connectivity.peers)}")
             for peer in connectivity.peers[:5]:
                 name_str = f" {peer.name}" if peer.name else ""
-                summary.append(
-                    f"  - AS{peer.asn}{name_str} ({peer.peers_percent:.1f}% visibility)"
-                )
+                summary.append(f"  - AS{peer.asn}{name_str} ({peer.peers_percent:.1f}% visibility)")
             if len(connectivity.peers) > 5:
                 summary.append(f"  ... and {len(connectivity.peers) - 5} more")
             summary.append("")
@@ -1592,9 +1607,7 @@ class BGPTools:
             # RPKI section
             summary.append("**RPKI Validation:**")
             for origin, status in rpki_results.items():
-                status_emoji = {"valid": "✅", "invalid": "❌", "not-found": "❓"}.get(
-                    status, "⚠️"
-                )
+                status_emoji = {"valid": "✅", "invalid": "❌", "not-found": "❓"}.get(status, "⚠️")
                 summary.append(f"  - AS{origin}: {status_emoji} {status.upper()}")
             summary.append("")
 
@@ -1628,7 +1641,9 @@ class BGPTools:
                 for factor in risk_factors:
                     summary.append(f"  - {factor}")
             else:
-                summary.append("**No risk factors detected.** Prefix appears to be routing normally.")
+                summary.append(
+                    "**No risk factors detected.** Prefix appears to be routing normally."
+                )
 
             return "\n".join(summary)
 

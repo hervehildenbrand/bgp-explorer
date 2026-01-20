@@ -163,9 +163,7 @@ class ClaudeBackend(AIBackend):
 
         return type_map.get(python_type, "string")
 
-    async def chat(
-        self, message: str, on_event: ChatCallback | None = None
-    ) -> str:
+    async def chat(self, message: str, on_event: ChatCallback | None = None) -> str:
         """Send a message and get a response.
 
         Handles the tool execution loop automatically.
@@ -241,10 +239,12 @@ class ClaudeBackend(AIBackend):
                             if on_event:
                                 summary = self._extract_thinking_summary(current_thinking)
                                 if summary:
-                                    on_event(ChatEvent(
-                                        type="thinking_summary",
-                                        data={"summary": summary, "iteration": iterations},
-                                    ))
+                                    on_event(
+                                        ChatEvent(
+                                            type="thinking_summary",
+                                            data={"summary": summary, "iteration": iterations},
+                                        )
+                                    )
                             current_thinking = ""
                         if current_tool_id:
                             current_tool_id = None
@@ -257,10 +257,12 @@ class ClaudeBackend(AIBackend):
                 # Process final message content to get proper signatures
                 for block in final_message.content:
                     if block.type == "thinking":
-                        thinking_blocks.append(ThinkingBlock(
-                            thinking=block.thinking,
-                            signature=getattr(block, 'signature', None),
-                        ))
+                        thinking_blocks.append(
+                            ThinkingBlock(
+                                thinking=block.thinking,
+                                signature=getattr(block, "signature", None),
+                            )
+                        )
                     elif block.type == "text":
                         # text_parts already populated from streaming
                         pass
@@ -361,7 +363,7 @@ class ClaudeBackend(AIBackend):
                     # Remove leading phrases like "Okay, " or "Alright, "
                     for prefix in ["Okay, ", "Alright, ", "Ok, ", "So, ", "Well, "]:
                         if summary.startswith(prefix):
-                            summary = summary[len(prefix):]
+                            summary = summary[len(prefix) :]
 
                     # If line ends mid-sentence, continue reading subsequent lines
                     # A sentence is complete if it ends with terminal punctuation
@@ -422,10 +424,12 @@ class ClaudeBackend(AIBackend):
             # Emit tool_start event
             if on_event:
                 status_msg = get_tool_status_message(tc.name, tc.arguments)
-                on_event(ChatEvent(
-                    type="tool_start",
-                    data={"tool": tc.name, "message": status_msg},
-                ))
+                on_event(
+                    ChatEvent(
+                        type="tool_start",
+                        data={"tool": tc.name, "message": status_msg},
+                    )
+                )
 
             func = self._tools.get(tc.name)
             if func is None:
@@ -436,10 +440,12 @@ class ClaudeBackend(AIBackend):
                     )
                 )
                 if on_event:
-                    on_event(ChatEvent(
-                        type="tool_end",
-                        data={"tool": tc.name, "error": f"Unknown tool: {tc.name}"},
-                    ))
+                    on_event(
+                        ChatEvent(
+                            type="tool_end",
+                            data={"tool": tc.name, "error": f"Unknown tool: {tc.name}"},
+                        )
+                    )
                 continue
 
             try:
@@ -457,20 +463,22 @@ class ClaudeBackend(AIBackend):
 
                 # Emit tool_end event
                 if on_event:
-                    on_event(ChatEvent(
-                        type="tool_end",
-                        data={"tool": tc.name},
-                    ))
+                    on_event(
+                        ChatEvent(
+                            type="tool_end",
+                            data={"tool": tc.name},
+                        )
+                    )
 
             except Exception as e:
-                results.append(
-                    ToolResult(tool_call_id=tc.id, error=str(e))
-                )
+                results.append(ToolResult(tool_call_id=tc.id, error=str(e)))
                 if on_event:
-                    on_event(ChatEvent(
-                        type="tool_end",
-                        data={"tool": tc.name, "error": str(e)},
-                    ))
+                    on_event(
+                        ChatEvent(
+                            type="tool_end",
+                            data={"tool": tc.name, "error": str(e)},
+                        )
+                    )
 
         return results
 
@@ -503,28 +511,34 @@ class ClaudeBackend(AIBackend):
                 if is_current_turn and msg.thinking_blocks:
                     for tb in msg.thinking_blocks:
                         if tb.signature:  # Signature is required by API
-                            content.append({
-                                "type": "thinking",
-                                "thinking": tb.thinking,
-                                "signature": tb.signature,
-                            })
+                            content.append(
+                                {
+                                    "type": "thinking",
+                                    "thinking": tb.thinking,
+                                    "signature": tb.signature,
+                                }
+                            )
 
                 # Add tool calls
                 if msg.tool_calls:
                     for tc in msg.tool_calls:
-                        content.append({
-                            "type": "tool_use",
-                            "id": tc.id,
-                            "name": tc.name,
-                            "input": tc.arguments,
-                        })
+                        content.append(
+                            {
+                                "type": "tool_use",
+                                "id": tc.id,
+                                "name": tc.name,
+                                "input": tc.arguments,
+                            }
+                        )
 
                 # Add text content
                 if msg.content:
-                    content.append({
-                        "type": "text",
-                        "text": msg.content,
-                    })
+                    content.append(
+                        {
+                            "type": "text",
+                            "text": msg.content,
+                        }
+                    )
 
                 if content:
                     messages.append({"role": "assistant", "content": content})
@@ -533,12 +547,14 @@ class ClaudeBackend(AIBackend):
                 if msg.tool_results:
                     content = []
                     for tr in msg.tool_results:
-                        content.append({
-                            "type": "tool_result",
-                            "tool_use_id": tr.tool_call_id,
-                            "content": tr.output or tr.error,
-                            "is_error": tr.error is not None,
-                        })
+                        content.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tr.tool_call_id,
+                                "content": tr.output or tr.error,
+                                "is_error": tr.error is not None,
+                            }
+                        )
                     messages.append({"role": "user", "content": content})
 
         return messages

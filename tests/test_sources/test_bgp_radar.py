@@ -1,14 +1,13 @@
 """Tests for bgp-radar subprocess client."""
 
-import asyncio
 import json
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 
 from bgp_explorer.models.event import BGPEvent, EventType, Severity
-from bgp_explorer.sources.bgp_radar import BgpRadarClient, BgpRadarError
+from bgp_explorer.sources.bgp_radar import BgpRadarClient
 
 
 class TestBgpRadarClient:
@@ -22,15 +21,17 @@ class TestBgpRadarClient:
     @pytest.mark.asyncio
     async def test_parse_event_hijack(self, client):
         """Test parsing a hijack event from bgp-radar log line."""
-        event_json = json.dumps({
-            "type": "hijack",
-            "severity": "high",
-            "affected_prefix": "8.8.8.0/24",
-            "affected_asn": 15169,
-            "timestamp": "2024-01-01T12:00:00Z",
-            "expected_origin": 15169,
-            "observed_origin": 64496,
-        })
+        event_json = json.dumps(
+            {
+                "type": "hijack",
+                "severity": "high",
+                "affected_prefix": "8.8.8.0/24",
+                "affected_asn": 15169,
+                "timestamp": "2024-01-01T12:00:00Z",
+                "expected_origin": 15169,
+                "observed_origin": 64496,
+            }
+        )
         log_line = f"2024/01/01 12:00:00 EVENT: {event_json}"
 
         event = client._parse_event(log_line)
@@ -44,13 +45,15 @@ class TestBgpRadarClient:
     @pytest.mark.asyncio
     async def test_parse_event_leak(self, client):
         """Test parsing a route leak event."""
-        event_json = json.dumps({
-            "type": "leak",
-            "severity": "medium",
-            "affected_prefix": "1.1.1.0/24",
-            "affected_asn": 13335,
-            "timestamp": "2024-01-01T12:00:00Z",
-        })
+        event_json = json.dumps(
+            {
+                "type": "leak",
+                "severity": "medium",
+                "affected_prefix": "1.1.1.0/24",
+                "affected_asn": 13335,
+                "timestamp": "2024-01-01T12:00:00Z",
+            }
+        )
         log_line = f"2024/01/01 12:00:00 EVENT: {event_json}"
 
         event = client._parse_event(log_line)
@@ -62,13 +65,15 @@ class TestBgpRadarClient:
     @pytest.mark.asyncio
     async def test_parse_event_blackhole(self, client):
         """Test parsing a blackhole event."""
-        event_json = json.dumps({
-            "type": "blackhole",
-            "severity": "low",
-            "affected_prefix": "192.0.2.0/24",
-            "affected_asn": 64496,
-            "timestamp": "2024-01-01T12:00:00Z",
-        })
+        event_json = json.dumps(
+            {
+                "type": "blackhole",
+                "severity": "low",
+                "affected_prefix": "192.0.2.0/24",
+                "affected_asn": 64496,
+                "timestamp": "2024-01-01T12:00:00Z",
+            }
+        )
         log_line = f"2024/01/01 12:00:00 EVENT: {event_json}"
 
         event = client._parse_event(log_line)
@@ -114,13 +119,13 @@ class TestBgpRadarClient:
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         event2 = BGPEvent(
             type=EventType.LEAK,
             severity=Severity.MEDIUM,
             affected_prefix="1.1.1.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         await client._event_cache.set("event1", event1)
         await client._event_cache.set("event2", event2)
@@ -138,13 +143,13 @@ class TestBgpRadarClient:
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         event2 = BGPEvent(
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="1.1.1.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         client._recent_events = [event1, event2]
 
@@ -160,14 +165,14 @@ class TestBgpRadarClient:
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
             affected_asn=15169,
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         event2 = BGPEvent(
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="1.1.1.0/24",
             affected_asn=13335,
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         client._recent_events = [event1, event2]
 
@@ -211,7 +216,7 @@ class TestBgpRadarClient:
                 type=EventType.HIJACK,
                 severity=Severity.HIGH,
                 affected_prefix=f"10.0.{i}.0/24",
-                detected_at=datetime.now(timezone.utc),
+                detected_at=datetime.now(UTC),
             )
             await client._add_event(event)
 
@@ -247,7 +252,7 @@ class TestBgpRadarClient:
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         await client._add_event(event)
 
@@ -261,7 +266,7 @@ class TestBgpRadarClient:
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         # Should not raise
         await client._add_event(event)
@@ -282,7 +287,7 @@ class TestBgpRadarClient:
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         await client._add_event(event)
 
@@ -304,7 +309,7 @@ class TestBgpRadarClient:
             type=EventType.HIJACK,
             severity=Severity.HIGH,
             affected_prefix="8.8.8.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         await client._add_event(hijack)
 
@@ -313,7 +318,7 @@ class TestBgpRadarClient:
             type=EventType.LEAK,
             severity=Severity.MEDIUM,
             affected_prefix="1.1.1.0/24",
-            detected_at=datetime.now(timezone.utc),
+            detected_at=datetime.now(UTC),
         )
         await client._add_event(leak)
 
@@ -337,7 +342,7 @@ class TestBgpRadarClient:
                 type=event_type,
                 severity=Severity.HIGH,
                 affected_prefix="8.8.8.0/24",
-                detected_at=datetime.now(timezone.utc),
+                detected_at=datetime.now(UTC),
             )
             await client._add_event(event)
 
@@ -360,7 +365,7 @@ class TestBgpRadarClient:
                 type=event_type,
                 severity=Severity.HIGH,
                 affected_prefix="8.8.8.0/24",
-                detected_at=datetime.now(timezone.utc),
+                detected_at=datetime.now(UTC),
             )
             await client._add_event(event)
 
@@ -378,31 +383,37 @@ class TestBgpRadarClient:
         client.set_event_filter({EventType.HIJACK})
 
         # Add hijack - passes
-        await client._add_event(BGPEvent(
-            type=EventType.HIJACK,
-            severity=Severity.HIGH,
-            affected_prefix="8.8.8.0/24",
-            detected_at=datetime.now(timezone.utc),
-        ))
+        await client._add_event(
+            BGPEvent(
+                type=EventType.HIJACK,
+                severity=Severity.HIGH,
+                affected_prefix="8.8.8.0/24",
+                detected_at=datetime.now(UTC),
+            )
+        )
 
         # Change filter to leak only
         client.set_event_filter({EventType.LEAK})
 
         # Add leak - now passes
-        await client._add_event(BGPEvent(
-            type=EventType.LEAK,
-            severity=Severity.MEDIUM,
-            affected_prefix="1.1.1.0/24",
-            detected_at=datetime.now(timezone.utc),
-        ))
+        await client._add_event(
+            BGPEvent(
+                type=EventType.LEAK,
+                severity=Severity.MEDIUM,
+                affected_prefix="1.1.1.0/24",
+                detected_at=datetime.now(UTC),
+            )
+        )
 
         # Add hijack - now filtered out
-        await client._add_event(BGPEvent(
-            type=EventType.HIJACK,
-            severity=Severity.HIGH,
-            affected_prefix="2.2.2.0/24",
-            detected_at=datetime.now(timezone.utc),
-        ))
+        await client._add_event(
+            BGPEvent(
+                type=EventType.HIJACK,
+                severity=Severity.HIGH,
+                affected_prefix="2.2.2.0/24",
+                detected_at=datetime.now(UTC),
+            )
+        )
 
         assert len(received_events) == 2
         assert received_events[0].type == EventType.HIJACK

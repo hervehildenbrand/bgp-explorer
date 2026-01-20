@@ -133,12 +133,8 @@ class BGPStreamClient(DataSource):
             List of BGPRoute objects representing the RIB state.
         """
         # RIB dumps are typically every 2 hours, so we search in a window
-        start = datetime.fromtimestamp(
-            timestamp.timestamp() - 7200, tz=UTC
-        )
-        end = datetime.fromtimestamp(
-            timestamp.timestamp() + 7200, tz=UTC
-        )
+        start = datetime.fromtimestamp(timestamp.timestamp() - 7200, tz=UTC)
+        end = datetime.fromtimestamp(timestamp.timestamp() + 7200, tz=UTC)
 
         stream = pybgpstream.BGPStream(
             from_time=int(start.timestamp()),

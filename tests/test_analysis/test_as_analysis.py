@@ -1,6 +1,6 @@
 """Tests for AS analysis module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ class TestASAnalyzer:
     @pytest.fixture
     def sample_routes(self):
         """Create sample routes for testing."""
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         return [
             BGPRoute(
                 prefix="8.8.8.0/24",

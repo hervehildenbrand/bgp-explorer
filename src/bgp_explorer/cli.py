@@ -125,6 +125,7 @@ def setup_readline_completion():
     # Don't complete on empty input
     readline.set_completer_delims(" \t\n")
 
+
 from bgp_explorer.agent import BGPExplorerAgent
 from bgp_explorer.ai.base import ChatEvent
 from bgp_explorer.config import ClaudeModel, OutputFormat, load_settings
@@ -222,6 +223,7 @@ def install_deps():
             try:
                 # Detect architecture
                 import platform
+
                 machine = platform.machine().lower()
                 if machine in ("x86_64", "amd64"):
                     arch = "amd64"
@@ -269,25 +271,40 @@ def install_deps():
                             env = os.environ.copy()
                             env["GOPATH"] = os.path.join(home, "go")
                             env["GOROOT"] = os.path.join(go_install_dir, "go")
-                            env["PATH"] = f"{os.path.join(home, 'go', 'bin')}:{os.path.join(go_install_dir, 'go', 'bin')}:{env.get('PATH', '')}"
+                            env["PATH"] = (
+                                f"{os.path.join(home, 'go', 'bin')}:{os.path.join(go_install_dir, 'go', 'bin')}:{env.get('PATH', '')}"
+                            )
 
                             result = subprocess.run(
-                                [go_path, "install", "github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest"],
+                                [
+                                    go_path,
+                                    "install",
+                                    "github.com/hervehildenbrand/bgp-radar/cmd/bgp-radar@latest",
+                                ],
                                 capture_output=True,
                                 text=True,
                                 timeout=300,
                                 env=env,
                             )
                             if result.returncode == 0:
-                                click.echo(click.style("✓ bgp-radar installed successfully", fg="green"))
-                                click.echo(click.style("  Note: Add ~/.local/go/bin and ~/go/bin to your PATH", fg="yellow"))
+                                click.echo(
+                                    click.style("✓ bgp-radar installed successfully", fg="green")
+                                )
+                                click.echo(
+                                    click.style(
+                                        "  Note: Add ~/.local/go/bin and ~/go/bin to your PATH",
+                                        fg="yellow",
+                                    )
+                                )
                                 success_count += 1
                             else:
                                 click.echo(click.style("✗ Failed to install bgp-radar", fg="red"))
                                 if result.stderr:
                                     click.echo(f"  Error: {result.stderr.strip()[:200]}")
                         else:
-                            click.echo(click.style("✗ Go binary not found after extraction", fg="red"))
+                            click.echo(
+                                click.style("✗ Go binary not found after extraction", fg="red")
+                            )
                     else:
                         click.echo(click.style("✗ Failed to download/extract Go", fg="red"))
                         if result.stderr:
@@ -344,13 +361,17 @@ def install_deps():
                     success_count += 1
                 else:
                     click.echo(click.style("✓ monocle built successfully", fg="green"))
-                    click.echo(click.style("  Note: Ensure ~/.cargo/bin is in your PATH", fg="yellow"))
+                    click.echo(
+                        click.style("  Note: Ensure ~/.cargo/bin is in your PATH", fg="yellow")
+                    )
                     success_count += 1
             else:
                 click.echo(click.style("✗ Failed to install monocle", fg="red"))
                 if result.stderr:
                     # Cargo outputs to stderr even on success, filter errors
-                    error_lines = [line for line in result.stderr.split('\n') if 'error' in line.lower()]
+                    error_lines = [
+                        line for line in result.stderr.split("\n") if "error" in line.lower()
+                    ]
                     if error_lines:
                         click.echo(f"  Error: {error_lines[0]}")
         except subprocess.TimeoutExpired:
@@ -367,7 +388,11 @@ def install_deps():
             try:
                 # Download and run rustup installer
                 result = subprocess.run(
-                    ["sh", "-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"],
+                    [
+                        "sh",
+                        "-c",
+                        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=300,
@@ -414,9 +439,13 @@ def install_deps():
     click.echo("=" * 50)
 
     if success_count == total_deps:
-        click.echo(click.style(f"✓ All {total_deps} dependencies installed successfully!", fg="green"))
+        click.echo(
+            click.style(f"✓ All {total_deps} dependencies installed successfully!", fg="green")
+        )
     elif success_count > 0:
-        click.echo(click.style(f"⚠ {success_count}/{total_deps} dependencies installed", fg="yellow"))
+        click.echo(
+            click.style(f"⚠ {success_count}/{total_deps} dependencies installed", fg="yellow")
+        )
         click.echo("  Some features may not be available.")
     else:
         click.echo(click.style("✗ No dependencies could be installed", fg="red"))
