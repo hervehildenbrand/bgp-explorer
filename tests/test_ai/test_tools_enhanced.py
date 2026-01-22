@@ -60,7 +60,7 @@ class TestAnalyzeAsPath:
         assert "AS Path Analysis: 8.8.8.0/24" in result
         assert "Path Diversity Metrics" in result
         assert "Unique paths" in result
-        assert "Upstream ASNs" in result
+        assert "Upstream hops in paths" in result
         mock_ripe_stat.get_bgp_state.assert_called_once_with("8.8.8.0/24")
 
     @pytest.mark.asyncio
