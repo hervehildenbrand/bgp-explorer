@@ -8,128 +8,61 @@ import sys
 
 import click
 from dotenv import load_dotenv
-
-# Enable readline for arrow key history navigation and tab completion
-try:
-    import readline
-except ImportError:
-    readline = None  # readline not available on some platforms
-
-
-class CommandCompleter:
-    """Tab completion for / commands."""
-
-    # Command tree: command -> subcommands -> options
-    COMMANDS = {
-        "monitor": {
-            "start": ["hijack", "leak", "blackhole"],
-            "stop": [],
-            "status": [],
-            "filter": ["hijack", "leak", "blackhole"],
-        },
-        "thinking": [],  # /thinking [budget] - set thinking budget
-        "export": [],
-        "clear": [],
-        "help": [],
-    }
-
-    def __init__(self):
-        self.matches: list[str] = []
-
-    def complete(self, text: str, state: int) -> str | None:
-        """Readline completion function.
-
-        Args:
-            text: Current word being typed.
-            state: Index of completion to return.
-
-        Returns:
-            Completion string or None.
-        """
-        if state == 0:
-            # Get the full line buffer
-            line = readline.get_line_buffer() if readline else ""
-            self.matches = self._get_completions(line, text)
-
-        return self.matches[state] if state < len(self.matches) else None
-
-    def _get_completions(self, line: str, text: str) -> list[str]:
-        """Get list of completions for current input.
-
-        Args:
-            line: Full line buffer.
-            text: Current word being typed.
-
-        Returns:
-            List of matching completions.
-        """
-        # Only complete if line starts with /
-        if not line.startswith("/"):
-            return []
-
-        # Remove leading /
-        line_without_slash = line[1:].lstrip()
-        parts = line_without_slash.split()
-
-        # Completing the command itself (e.g., "/mon<tab>")
-        if len(parts) == 0 or (len(parts) == 1 and not line_without_slash.endswith(" ")):
-            prefix = text.lstrip("/")
-            return [f"/{cmd} " for cmd in self.COMMANDS if cmd.startswith(prefix)]
-
-        command = parts[0]
-        if command not in self.COMMANDS:
-            return []
-
-        subcommands = self.COMMANDS[command]
-
-        # Command has no subcommands
-        if isinstance(subcommands, list):
-            return []
-
-        # Completing subcommand (e.g., "/monitor st<tab>")
-        if len(parts) == 1 or (len(parts) == 2 and not line_without_slash.endswith(" ")):
-            prefix = parts[1] if len(parts) > 1 else ""
-            return [f"{sub} " for sub in subcommands if sub.startswith(prefix)]
-
-        # Completing options for subcommand (e.g., "/monitor start hi<tab>")
-        subcommand = parts[1]
-        if subcommand not in subcommands:
-            return []
-
-        options = subcommands[subcommand]
-        if not options:
-            return []
-
-        # Get already-used options to avoid duplicates
-        used_options = set(parts[2:])
-        prefix = text if text else ""
-
-        return [f"{opt} " for opt in options if opt.startswith(prefix) and opt not in used_options]
-
-
-def setup_readline_completion():
-    """Configure readline for tab completion."""
-    if readline is None:
-        return
-
-    completer = CommandCompleter()
-    readline.set_completer(completer.complete)
-
-    # Use tab for completion
-    # macOS uses libedit which needs different binding
-    if "libedit" in readline.__doc__:
-        readline.parse_and_bind("bind ^I rl_complete")
-    else:
-        readline.parse_and_bind("tab: complete")
-
-    # Don't complete on empty input
-    readline.set_completer_delims(" \t\n")
-
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.styles import Style
 
 from bgp_explorer.agent import BGPExplorerAgent
 from bgp_explorer.ai.base import ChatEvent
 from bgp_explorer.config import ClaudeModel, OutputFormat, load_settings
 from bgp_explorer.output import OutputFormatter
+
+# Command definitions with descriptions
+COMMANDS = {
+    "/clear": "Clear screen and conversation",
+    "/export": "Export conversation to file",
+    "/help": "Show help",
+    "/thinking": "Set thinking budget (1024-16000)",
+    "/monitor start": "Start BGP monitoring",
+    "/monitor stop": "Stop monitoring",
+    "/monitor status": "Show monitoring status",
+    "/monitor filter": "Set event filter",
+}
+
+
+class SlashCommandCompleter(Completer):
+    """Completer that shows commands when / is typed."""
+
+    def get_completions(self, document, complete_event):
+        """Get completions for the current input."""
+        text = document.text_before_cursor
+
+        # Only show completions if text starts with /
+        if not text.startswith("/"):
+            return
+
+        # Show all commands when just "/" is typed
+        for cmd, description in COMMANDS.items():
+            if cmd.startswith(text):
+                # Show the command without the part already typed
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display=cmd,
+                    display_meta=description,
+                )
+
+
+# Style for prompt_toolkit
+PROMPT_STYLE = Style.from_dict(
+    {
+        "completion-menu.completion": "bg:#333333 #ffffff",
+        "completion-menu.completion.current": "bg:#00aa00 #ffffff",
+        "completion-menu.meta.completion": "bg:#333333 #888888",
+        "completion-menu.meta.completion.current": "bg:#00aa00 #ffffff",
+    }
+)
 
 
 @click.group()
@@ -566,10 +499,15 @@ async def run_chat(settings, output: OutputFormatter) -> None:
         settings: Application settings.
         output: Output formatter.
     """
-    # Enable tab completion for / commands
-    setup_readline_completion()
-
     agent = BGPExplorerAgent(settings, output)
+
+    # Create prompt session with command completer
+    session: PromptSession = PromptSession(
+        completer=SlashCommandCompleter(),
+        complete_while_typing=True,
+        history=InMemoryHistory(),
+        style=PROMPT_STYLE,
+    )
 
     try:
         await agent.initialize()
@@ -577,12 +515,14 @@ async def run_chat(settings, output: OutputFormatter) -> None:
 
         while True:
             try:
-                # Get user input with decorative box (show monitoring badge if active)
+                # Get user input with prompt_toolkit (shows completions as you type)
                 monitoring_status = agent.get_monitoring_status()
-                output.display_input_box(monitoring_status)
-                user_input = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: input("> ")
-                )
+                if monitoring_status:
+                    prompt_text = f"[MONITORING: {monitoring_status}] > "
+                else:
+                    prompt_text = "> "
+
+                user_input = await session.prompt_async(prompt_text)
                 user_input = user_input.strip()
 
                 if not user_input:
@@ -612,33 +552,37 @@ async def run_chat(settings, output: OutputFormatter) -> None:
                 output.display_user_input(user_input)
 
                 try:
-                    # Start processing - spinner above input box at bottom
-                    output.start_processing_with_input_box()
-
                     # Event handler to update status during processing
                     def handle_event(event: ChatEvent) -> None:
                         if event.type == "tool_start":
                             message = event.data.get("message", "Running tool...")
-                            output.display_status_above_input(message)
+                            print(f"\r\033[K  {message}", end="", flush=True)
                         elif event.type == "tool_end":
-                            output.display_status_above_input("Thinking...")
+                            print("\r\033[K  Thinking...", end="", flush=True)
                         elif event.type == "thinking_summary":
-                            # Display thinking summary above input box
                             summary = event.data.get("summary", "")
-                            iteration = event.data.get("iteration", 1)
-                            output.display_thinking_summary(summary, iteration)
+                            if summary:
+                                # Truncate long summaries
+                                if len(summary) > 80:
+                                    summary = summary[:77] + "..."
+                                print(f"\r\033[K  💭 {summary}", end="", flush=True)
 
+                    print("  Thinking...", end="", flush=True)
                     response = await agent.chat(user_input, on_event=handle_event)
 
-                    # Clear processing area before showing response
-                    output.finish_processing()
+                    # Clear the status line
+                    print("\r\033[K", end="", flush=True)
                     output.display_response(response)
                 except Exception as e:
-                    output.finish_processing()
+                    print("\r\033[K", end="", flush=True)
                     output.display_error(f"AI error: {e}")
 
             except EOFError:
                 break
+            except KeyboardInterrupt:
+                # Ctrl+C during input - just show new prompt
+                print()
+                continue
 
     finally:
         await agent.shutdown()
