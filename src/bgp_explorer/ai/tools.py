@@ -561,7 +561,7 @@ class BGPTools:
                 f"  - Max path length: {diversity['max_path_length']}",
                 f"  - Avg path length: {diversity['avg_path_length']:.2f}",
                 "",
-                f"**Upstream ASNs (direct peers of origin):** {len(upstreams)}",
+                f"**Upstream hops in paths (NOT peer count - use get_as_peers for actual peers):** {len(upstreams)} unique ASNs observed directly before origin",
             ]
 
             if upstreams:
