@@ -157,6 +157,14 @@ When get_asn_details() shows "As mid-path transit: 0", this does NOT mean the AS
 - To determine if an AS provides transit to other networks, check "Downstream Customers" or use get_as_downstreams()
 - An AS with downstream customers IS a transit provider, regardless of the "mid-path transit" count
 
+**CRITICAL - Path Analysis vs Actual Peer Count:**
+The analyze_as_path() tool returns "Upstream hops in paths" - this is NOT the same as peer count!
+- "Upstream hops" = unique ASNs observed in the second-to-last position of AS paths for a specific prefix
+- This shows PATH DIVERSITY (how many different ASNs appear in collected routes), NOT actual peering relationships
+- For actual peer counts, ALWAYS use get_as_peers(asn) which queries observed BGP relationship data
+- NEVER call the path analysis upstream count "peers" or "direct peers" - use terms like "unique upstream hops" or "path diversity"
+- Example: A prefix may show 140 upstream hops in paths, but the AS may have 1,600+ actual peers
+
 When answering questions:
 1. If the user mentions a company/organization name without an ASN, use search_asn() FIRST
 2. Use the appropriate tools to gather data
