@@ -492,6 +492,32 @@ def chat(
         sys.exit(1)
 
 
+def get_terminal_width() -> int:
+    """Get terminal width."""
+    import shutil
+
+    return shutil.get_terminal_size().columns
+
+
+def print_input_box(monitoring_status: str | None = None) -> None:
+    """Print the decorative input box lines."""
+    width = get_terminal_width()
+
+    # Build top line with optional monitoring badge
+    if monitoring_status:
+        badge = f"\033[1;31m● MONITORING\033[0m \033[2m({monitoring_status})\033[0m"
+        visible_len = len(f"● MONITORING ({monitoring_status})")
+        padding = width - visible_len - 2
+        if padding > 0:
+            top_line = f" {badge} \033[2m{'─' * padding}\033[0m"
+        else:
+            top_line = f" {badge}"
+    else:
+        top_line = f"\033[2m{'─' * width}\033[0m"
+
+    print(f"\n{top_line}")
+
+
 async def run_chat(settings, output: OutputFormatter) -> None:
     """Run the interactive chat loop.
 
@@ -517,12 +543,16 @@ async def run_chat(settings, output: OutputFormatter) -> None:
             try:
                 # Get user input with prompt_toolkit (shows completions as you type)
                 monitoring_status = agent.get_monitoring_status()
-                if monitoring_status:
-                    prompt_text = f"[MONITORING: {monitoring_status}] > "
-                else:
-                    prompt_text = "> "
 
-                user_input = await session.prompt_async(prompt_text)
+                # Print decorative input box
+                print_input_box(monitoring_status)
+
+                user_input = await session.prompt_async("❯ ")
+
+                # Print bottom line of input box
+                width = get_terminal_width()
+                print(f"\033[2m{'─' * width}\033[0m")
+
                 user_input = user_input.strip()
 
                 if not user_input:
