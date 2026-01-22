@@ -10,7 +10,9 @@ import click
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 
 from bgp_explorer.agent import BGPExplorerAgent
@@ -29,6 +31,9 @@ COMMANDS = {
     "/monitor status": "Show monitoring status",
     "/monitor filter": "Set event filter",
 }
+
+# Thinking budget cycle values for Shift+Tab
+THINKING_BUDGET_VALUES = [1024, 2048, 4096, 8000, 12000, 16000]
 
 
 class SlashCommandCompleter(Completer):
@@ -61,6 +66,7 @@ PROMPT_STYLE = Style.from_dict(
         "completion-menu.completion.current": "bg:#00aa00 #ffffff",
         "completion-menu.meta.completion": "bg:#333333 #888888",
         "completion-menu.meta.completion.current": "bg:#00aa00 #ffffff",
+        "bottom-toolbar": "bg:#333333 #aaaaaa",
     }
 )
 
@@ -492,30 +498,19 @@ def chat(
         sys.exit(1)
 
 
-def get_terminal_width() -> int:
-    """Get terminal width."""
-    import shutil
+def format_toolbar(model: str, thinking_budget: int, monitoring_status: str | None = None) -> HTML:
+    """Format the bottom toolbar with model, thinking budget, and optional monitoring status."""
+    # Format thinking budget with commas
+    budget_formatted = f"{thinking_budget:,}"
 
-    return shutil.get_terminal_size().columns
+    # Build the toolbar parts
+    parts = [f"<b>{model}</b>", f"thinking: {budget_formatted} tokens"]
 
-
-def print_input_box(monitoring_status: str | None = None) -> None:
-    """Print the decorative input box lines."""
-    width = get_terminal_width()
-
-    # Build top line with optional monitoring badge
     if monitoring_status:
-        badge = f"\033[1;31m● MONITORING\033[0m \033[2m({monitoring_status})\033[0m"
-        visible_len = len(f"● MONITORING ({monitoring_status})")
-        padding = width - visible_len - 2
-        if padding > 0:
-            top_line = f" {badge} \033[2m{'─' * padding}\033[0m"
-        else:
-            top_line = f" {badge}"
-    else:
-        top_line = f"\033[2m{'─' * width}\033[0m"
+        parts.append(f"<style fg='red'>●</style> <b>MONITORING</b> ({monitoring_status})")
 
-    print(f"\n{top_line}")
+    toolbar_text = " │ ".join(parts)
+    return HTML(f" {toolbar_text}")
 
 
 async def run_chat(settings, output: OutputFormatter) -> None:
@@ -527,12 +522,46 @@ async def run_chat(settings, output: OutputFormatter) -> None:
     """
     agent = BGPExplorerAgent(settings, output)
 
-    # Create prompt session with command completer
+    # Create toolbar function that captures settings and agent
+    def get_toolbar():
+        monitoring_status = agent.get_monitoring_status()
+        return format_toolbar(
+            model=settings.claude_model.value,
+            thinking_budget=settings.thinking_budget,
+            monitoring_status=monitoring_status,
+        )
+
+    # Create key bindings
+    kb = KeyBindings()
+
+    @kb.add("s-tab")
+    def cycle_thinking_budget(event):
+        """Cycle through thinking budget values on Shift+Tab."""
+        current = settings.thinking_budget
+        try:
+            idx = THINKING_BUDGET_VALUES.index(current)
+            next_idx = (idx + 1) % len(THINKING_BUDGET_VALUES)
+        except ValueError:
+            next_idx = 0
+
+        new_budget = THINKING_BUDGET_VALUES[next_idx]
+        settings.thinking_budget = new_budget
+
+        # Sync with AI backend
+        if agent._ai:
+            agent._ai.set_thinking_budget(new_budget)
+
+        # Refresh toolbar
+        event.app.invalidate()
+
+    # Create prompt session with command completer and bottom toolbar
     session: PromptSession = PromptSession(
         completer=SlashCommandCompleter(),
         complete_while_typing=True,
         history=InMemoryHistory(),
         style=PROMPT_STYLE,
+        bottom_toolbar=get_toolbar,
+        key_bindings=kb,
     )
 
     try:
@@ -542,16 +571,7 @@ async def run_chat(settings, output: OutputFormatter) -> None:
         while True:
             try:
                 # Get user input with prompt_toolkit (shows completions as you type)
-                monitoring_status = agent.get_monitoring_status()
-
-                # Print decorative input box
-                print_input_box(monitoring_status)
-
                 user_input = await session.prompt_async("❯ ")
-
-                # Print bottom line of input box
-                width = get_terminal_width()
-                print(f"\033[2m{'─' * width}\033[0m")
 
                 user_input = user_input.strip()
 
