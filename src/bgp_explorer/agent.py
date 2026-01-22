@@ -163,9 +163,16 @@ class BGPExplorerAgent:
             return True
 
         elif cmd == "clear":
+            import click
+
+            # Clear terminal screen
+            click.clear()
+            # Clear conversation history
             if self._ai:
                 self._ai.clear_history()
             self._output.clear_history()
+            # Re-display welcome after clear
+            self._output.display_welcome()
             return True
 
         elif cmd == "help":
