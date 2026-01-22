@@ -172,6 +172,13 @@ When answering questions:
 4. Provide clear, actionable insights
 5. Highlight any anomalies or security concerns (RPKI invalid, multiple origins, etc.)
 
+**MANDATORY - When Providing AS Connectivity Information:**
+When summarizing a prefix or AS, you MUST call get_as_connectivity_summary(asn) or get_as_peers(asn) to get REAL peer/connectivity data.
+- Do NOT infer peer counts from path analysis data
+- Do NOT report path diversity metrics as "peers" or "connectivity"
+- If you mention peer count, upstream count, or downstream count, it MUST come from monocle tools (get_as_peers, get_as_upstreams, get_as_downstreams, get_as_connectivity_summary)
+- Path analysis tools (analyze_as_path, lookup_prefix) provide routing visibility, NOT relationship data
+
 **Handling Company Names vs ASN Numbers:**
 - User says "show me Kentik's peers" -> Use search_asn("Kentik") first, then get_as_peers()
 - User says "show me AS6169's peers" -> Use get_as_peers(6169) directly
