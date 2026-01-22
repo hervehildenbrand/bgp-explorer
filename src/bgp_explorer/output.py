@@ -213,26 +213,35 @@ AI-powered assistant for BGP routing investigation.
         self.console.print(f"[dim]{info}[/dim]")
 
     def display_commands_help(self) -> None:
-        """Display available slash commands."""
+        """Display available slash commands in Claude Code style."""
+        from rich.box import ROUNDED
         from rich.table import Table
 
-        table = Table(show_header=False, box=None, padding=(0, 2))
-        table.add_column("Command", style="bold cyan")
+        table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+        table.add_column("Command", style="bold cyan", no_wrap=True, width=28)
         table.add_column("Description", style="dim")
 
-        table.add_row("/clear", "Clear screen and conversation history")
-        table.add_row("/export [path]", "Export conversation to JSON")
-        table.add_row("/help", "Show full help message")
-        table.add_row("/thinking [budget]", "View or set thinking budget (1024-16000)")
-        table.add_row("/monitor start [types]", "Start real-time BGP monitoring")
+        table.add_row("/clear", "Clear screen and conversation")
+        table.add_row("/export [path]", "Export conversation to file")
+        table.add_row("/help", "Show help")
+        table.add_row("/thinking [budget]", "Set thinking budget (1024-16000)")
+        table.add_row("/monitor start [type]", "Start BGP monitoring")
         table.add_row("/monitor stop", "Stop monitoring")
-        table.add_row("/monitor status", "Check monitoring status")
-        table.add_row("/monitor filter [types]", "Change event filter")
+        table.add_row("/monitor status", "Show monitoring status")
+        table.add_row("/monitor filter [type]", "Set event filter")
         table.add_row("", "")
-        table.add_row("exit, quit, bye", "Exit the application")
+        table.add_row("[dim]exit[/dim]", "[dim]Exit BGP Explorer[/dim]")
 
-        self.console.print("\n[bold]Commands[/bold] [dim](type / to see this list)[/dim]\n")
-        self.console.print(table)
+        panel = Panel(
+            table,
+            title="[bold]Commands[/bold]",
+            title_align="left",
+            border_style="dim",
+            box=ROUNDED,
+            padding=(0, 1),
+        )
+        self.console.print()
+        self.console.print(panel)
         self.console.print()
 
     def _print_above_input_box(self, print_func: callable) -> None:
