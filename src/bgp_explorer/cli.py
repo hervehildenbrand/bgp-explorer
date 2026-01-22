@@ -397,6 +397,27 @@ def install_deps():
 
 
 @cli.command()
+def mcp():
+    """Start MCP server for Claude Code integration.
+
+    This allows you to use BGP Explorer tools with Claude Code (Pro/Max
+    subscription) without needing a separate API key.
+
+    Setup:
+        1. Run: bgp-explorer mcp (keeps running)
+        2. In another terminal, configure Claude Code:
+           claude mcp add bgp-explorer -- bgp-explorer mcp
+        3. Use Claude Code normally - BGP tools are now available!
+
+    Or use the simpler one-liner:
+        claude mcp add bgp-explorer -- bgp-explorer mcp
+    """
+    from bgp_explorer.mcp_server import main as run_mcp
+
+    run_mcp()
+
+
+@cli.command()
 @click.option(
     "--model",
     type=click.Choice(["sonnet", "opus"]),

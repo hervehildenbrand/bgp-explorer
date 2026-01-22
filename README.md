@@ -40,6 +40,25 @@ uv run bgp-explorer install-deps  # Auto-installs Go + Rust + binaries
 uv run bgp-explorer chat          # All 23 tools ready!
 ```
 
+## Use with Claude Code (No API Key Needed)
+
+If you have a **Claude Code subscription** (Pro/Max), you can use BGP Explorer tools directly in Claude Code without needing an Anthropic API key:
+
+```bash
+# One-time setup: add bgp-explorer as an MCP server
+claude mcp add bgp-explorer -- bgp-explorer mcp
+
+# Then use Claude Code normally - BGP tools are available!
+claude
+> Search for Cloudflare's ASNs and show their peers
+> Check if 8.8.8.0/24 is being hijacked
+> Ping 1.1.1.1 from Asia
+```
+
+**How it works:** The MCP server exposes 17 BGP investigation tools. All AI processing uses your Claude Code subscription - no separate API costs.
+
+See [Claude Code Integration](https://github.com/hervehildenbrand/bgp-explorer/wiki/Claude-Code-Integration) in the wiki for details.
+
 ## Prerequisites
 
 - **Python 3.11+**
@@ -197,7 +216,8 @@ Options:
 ### CLI Commands
 ```bash
 uv run bgp-explorer install-deps  # Auto-install Go, Rust, bgp-radar, monocle
-uv run bgp-explorer chat          # Start interactive chat
+uv run bgp-explorer chat          # Start interactive chat (requires API key)
+uv run bgp-explorer mcp           # Start MCP server for Claude Code integration
 ```
 
 ### Chat Commands
