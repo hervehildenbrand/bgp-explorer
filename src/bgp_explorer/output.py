@@ -217,20 +217,21 @@ AI-powered assistant for BGP routing investigation.
         from rich.table import Table
 
         table = Table(show_header=False, box=None, padding=(0, 2))
-        table.add_column("Command", style="bold")
+        table.add_column("Command", style="bold cyan")
         table.add_column("Description", style="dim")
 
+        table.add_row("/clear", "Clear screen and conversation history")
+        table.add_row("/export [path]", "Export conversation to JSON")
+        table.add_row("/help", "Show full help message")
+        table.add_row("/thinking [budget]", "View or set thinking budget (1024-16000)")
         table.add_row("/monitor start [types]", "Start real-time BGP monitoring")
         table.add_row("/monitor stop", "Stop monitoring")
         table.add_row("/monitor status", "Check monitoring status")
         table.add_row("/monitor filter [types]", "Change event filter")
-        table.add_row("/thinking [budget]", "View or set thinking budget (1024-16000)")
-        table.add_row("/export [path]", "Export conversation to JSON")
-        table.add_row("/clear", "Clear conversation history")
-        table.add_row("/help", "Show full help message")
-        table.add_row("exit", "Exit the application")
+        table.add_row("", "")
+        table.add_row("exit, quit, bye", "Exit the application")
 
-        self.console.print("\n[bold cyan]Available Commands:[/bold cyan]\n")
+        self.console.print("\n[bold]Commands[/bold] [dim](type / to see this list)[/dim]\n")
         self.console.print(table)
         self.console.print()
 
