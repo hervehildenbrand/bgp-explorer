@@ -160,6 +160,22 @@ async def search_asn(
             except Exception:
                 continue
 
+        # If RIPE Stat found nothing, try PeeringDB as fallback
+        if not all_results:
+            try:
+                peeringdb = await get_peeringdb()
+                if peeringdb is not None:
+                    pdb_results = peeringdb.search_networks(query)
+                    for network in pdb_results:
+                        if network.asn not in seen_asns:
+                            seen_asns.add(network.asn)
+                            all_results.append({
+                                "asn": network.asn,
+                                "description": f"{network.name} (via PeeringDB)",
+                            })
+            except Exception:
+                pass  # PeeringDB search failed, continue without it
+
         if not all_results:
             return (
                 f"No ASNs found matching '{query}' or its variations. "

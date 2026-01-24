@@ -546,6 +546,83 @@ class TestAddressFamilyFiltering:
         assert "IPv6 prefix" in result_ipv6
 
 
+class TestSearchAsnPeeringDBFallback:
+    """Tests for search_asn with PeeringDB fallback."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        """Create a mock RIPE Stat client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def mock_peeringdb(self):
+        """Create a mock PeeringDB client."""
+        from bgp_explorer.models.ixp import Network
+
+        mock = MagicMock()
+        mock._loaded = True
+
+        # Setup mock data - La Poste found in PeeringDB
+        mock.search_networks.return_value = [
+            Network(asn=35676, name="Groupe La Poste France", info_type="Enterprise"),
+        ]
+
+        return mock
+
+    @pytest.fixture
+    def tools_with_peeringdb(self, mock_ripe_stat, mock_peeringdb):
+        """Create BGPTools instance with PeeringDB."""
+        return BGPTools(ripe_stat=mock_ripe_stat, peeringdb=mock_peeringdb)
+
+    @pytest.mark.asyncio
+    async def test_search_asn_uses_peeringdb_fallback_when_ripe_empty(
+        self, tools_with_peeringdb, mock_ripe_stat, mock_peeringdb
+    ):
+        """Test that PeeringDB is used as fallback when RIPE Stat returns nothing."""
+        # RIPE Stat returns empty for "La Poste"
+        mock_ripe_stat.search_asn.return_value = []
+
+        result = await tools_with_peeringdb.search_asn("La Poste")
+
+        # Should have called PeeringDB as fallback
+        mock_peeringdb.search_networks.assert_called()
+        # Should find La Poste via PeeringDB
+        assert "35676" in result
+        assert "Poste" in result
+
+    @pytest.mark.asyncio
+    async def test_search_asn_prefers_ripe_when_results_found(
+        self, tools_with_peeringdb, mock_ripe_stat, mock_peeringdb
+    ):
+        """Test that RIPE Stat results are used when available."""
+        # RIPE Stat returns results
+        mock_ripe_stat.search_asn.return_value = [
+            {"asn": 15169, "description": "Google LLC"}
+        ]
+
+        result = await tools_with_peeringdb.search_asn("Google")
+
+        # Should NOT have called PeeringDB (RIPE had results)
+        mock_peeringdb.search_networks.assert_not_called()
+        # Should find Google via RIPE
+        assert "15169" in result
+        assert "Google" in result
+
+    @pytest.mark.asyncio
+    async def test_search_asn_works_without_peeringdb(self, mock_ripe_stat):
+        """Test that search_asn works when PeeringDB is not available."""
+        # Create tools without PeeringDB
+        tools = BGPTools(ripe_stat=mock_ripe_stat, peeringdb=None)
+
+        # RIPE Stat returns empty
+        mock_ripe_stat.search_asn.return_value = []
+
+        result = await tools.search_asn("Unknown Network")
+
+        # Should gracefully handle missing PeeringDB
+        assert "No ASNs found" in result
+
+
 class TestCheckPrefixAnomalies:
     """Tests for check_prefix_anomalies tool."""
 

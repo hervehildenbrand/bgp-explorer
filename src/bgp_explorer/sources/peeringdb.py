@@ -438,6 +438,26 @@ class PeeringDBClient(DataSource):
 
         return results
 
+    def search_networks(self, query: str) -> list[Network]:
+        """Search for networks by organization name.
+
+        Args:
+            query: Search query (case-insensitive, partial match).
+
+        Returns:
+            List of matching Network records.
+        """
+        self._ensure_loaded()
+
+        query_lower = query.lower()
+        results = []
+
+        for network in self._asn_to_net.values():
+            if query_lower in network.name.lower():
+                results.append(network)
+
+        return results
+
     def get_network_info(self, asn: int) -> Network | None:
         """Get network information by ASN.
 
