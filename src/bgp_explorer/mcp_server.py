@@ -202,26 +202,31 @@ async def search_asn(
 
 @mcp.tool()
 async def lookup_prefix(
-    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")]
+    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")]
 ) -> str:
     """Look up BGP routing information for an IP prefix.
 
     Returns the origin ASN, AS paths from multiple vantage points,
     and visibility information for the specified prefix.
+    Auto-detects and reports whether this is an IPv4 or IPv6 prefix.
     """
     try:
         client = await get_ripe_stat()
         routes = await client.get_bgp_state(prefix)
 
+        # Detect address family
+        is_ipv6 = ":" in prefix
+        family_str = "IPv6" if is_ipv6 else "IPv4"
+
         if not routes:
-            return f"No routes found for prefix {prefix}. The prefix may not be announced or visible from RIPE RIS collectors."
+            return f"No routes found for {family_str} prefix {prefix}. The prefix may not be announced or visible from RIPE RIS collectors."
 
         origin_asns = set(r.origin_asn for r in routes)
         collectors = set(r.collector for r in routes)
         unique_paths = set(tuple(r.as_path) for r in routes)
 
         summary = [
-            f"**Prefix: {prefix}**",
+            f"**Prefix: {prefix}** ({family_str})",
             "",
             f"**Origin ASN(s):** {', '.join(f'AS{asn}' for asn in sorted(origin_asns))}",
             f"**Visible from:** {len(collectors)} collectors ({', '.join(sorted(collectors)[:5])}{'...' if len(collectors) > 5 else ''})",
@@ -247,7 +252,8 @@ async def get_asn_announcements(
     """Get all prefixes announced by an Autonomous System.
 
     Returns a list of IP prefixes that are currently originated
-    by the specified ASN, separated into IPv4 and IPv6.
+    by the specified ASN. Always reports IPv4 and IPv6 counts separately,
+    as many networks handle the two address families differently.
     """
     try:
         client = await get_ripe_stat()
@@ -338,15 +344,21 @@ async def get_routing_history(
 
 @mcp.tool()
 async def get_rpki_status(
-    prefix: Annotated[str, Field(description="IP prefix in CIDR notation")],
+    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (IPv4 or IPv6)")],
     origin_asn: Annotated[int, Field(description="The AS number claiming to originate the prefix")],
 ) -> str:
     """Check RPKI validation status for a prefix/origin pair.
 
+    **USE PROACTIVELY** - Always check RPKI when investigating prefixes.
+    Include RPKI status in every prefix report without waiting to be asked.
+
     Validates whether the prefix announcement from the given
     origin ASN is covered by a valid ROA (Route Origin Authorization).
 
-    Returns: valid, invalid, or not-found.
+    Returns:
+    - valid: ROA exists and matches - legitimate announcement
+    - invalid: ROA exists but DOESN'T match - potential hijack!
+    - not-found: No ROA - owner hasn't deployed RPKI (common, not necessarily bad)
     """
     try:
         client = await get_ripe_stat()
@@ -455,6 +467,10 @@ async def get_asn_details(
 
     Provides comprehensive analysis including announced prefixes,
     upstream/downstream relationships, and routing behavior.
+    Always reports IPv4 and IPv6 prefix counts separately.
+
+    For security analysis, use check_prefix_anomalies on sample prefixes
+    from BOTH IPv4 and IPv6 families, as RPKI deployment may differ.
     """
     try:
         client = await get_ripe_stat()
@@ -516,19 +532,22 @@ async def get_asn_details(
 
 @mcp.tool()
 async def check_prefix_anomalies(
-    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")]
+    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")]
 ) -> str:
     """Check a prefix for potential hijack indicators.
 
     This tool provides on-demand anomaly detection by checking multiple
-    indicators that may suggest a BGP hijack or misconfiguration:
+    indicators that may suggest a BGP hijack or misconfiguration.
+    Works for both IPv4 and IPv6 prefixes.
 
+    Checks performed:
     1. MOAS Detection: Multiple Origin AS announcing the same prefix
     2. RPKI Validation: Checks if the announcement is covered by a valid ROA
     3. Origin Change Detection: Looks for recent changes in the originating ASN
     4. Visibility Analysis: Checks how many collectors see the prefix
 
     Use this when investigating a suspected hijack or validating prefix ownership.
+    When checking an ASN's security posture, check prefixes from BOTH IPv4 and IPv6.
     """
     try:
         client = await get_ripe_stat()

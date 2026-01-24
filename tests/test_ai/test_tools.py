@@ -428,6 +428,124 @@ class TestBGPToolsMonitoring:
         assert "stop_monitoring" not in tool_names
 
 
+class TestAddressFamilyFiltering:
+    """Tests for IPv4/IPv6 address family filtering."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        """Create a mock RIPE Stat client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def tools(self, mock_ripe_stat):
+        """Create BGPTools instance with mocked clients."""
+        return BGPTools(ripe_stat=mock_ripe_stat, bgp_radar=None)
+
+    @pytest.mark.asyncio
+    async def test_get_asn_announcements_default_shows_both(self, tools, mock_ripe_stat):
+        """Test that default shows both IPv4 and IPv6."""
+        mock_ripe_stat.get_announced_prefixes.return_value = [
+            "8.8.8.0/24",
+            "8.8.4.0/24",
+            "2001:4860::/32",
+        ]
+
+        result = await tools.get_asn_announcements(15169)
+
+        assert "IPv4: 2" in result
+        assert "IPv6: 1" in result
+        assert "8.8.8.0/24" in result
+        assert "2001:4860::/32" in result
+
+    @pytest.mark.asyncio
+    async def test_get_asn_announcements_ipv4_only(self, tools, mock_ripe_stat):
+        """Test filtering to IPv4 only."""
+        mock_ripe_stat.get_announced_prefixes.return_value = [
+            "8.8.8.0/24",
+            "8.8.4.0/24",
+            "2001:4860::/32",
+        ]
+
+        result = await tools.get_asn_announcements(15169, address_family=4)
+
+        assert "IPv4 prefixes (filtered)" in result
+        assert "8.8.8.0/24" in result
+        assert "8.8.4.0/24" in result
+        # IPv6 prefix should not be in the filtered output section
+        # but totals should still show both
+        assert "IPv4: 2" in result
+        assert "IPv6: 1" in result
+
+    @pytest.mark.asyncio
+    async def test_get_asn_announcements_ipv6_only(self, tools, mock_ripe_stat):
+        """Test filtering to IPv6 only."""
+        mock_ripe_stat.get_announced_prefixes.return_value = [
+            "8.8.8.0/24",
+            "2001:4860::/32",
+            "2607:f8b0::/32",
+        ]
+
+        result = await tools.get_asn_announcements(15169, address_family=6)
+
+        assert "IPv6 prefixes (filtered)" in result
+        assert "2001:4860::/32" in result
+        assert "2607:f8b0::/32" in result
+        # Totals should still show both
+        assert "IPv4: 1" in result
+        assert "IPv6: 2" in result
+
+    @pytest.mark.asyncio
+    async def test_lookup_prefix_reports_ipv4_family(self, tools, mock_ripe_stat):
+        """Test that lookup_prefix reports IPv4 address family."""
+        mock_routes = [
+            BGPRoute(
+                prefix="8.8.8.0/24",
+                origin_asn=15169,
+                as_path=[3356, 15169],
+                collector="rrc00",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+        ]
+        mock_ripe_stat.get_bgp_state.return_value = mock_routes
+
+        result = await tools.lookup_prefix("8.8.8.0/24")
+
+        assert "(IPv4)" in result
+        assert "8.8.8.0/24" in result
+
+    @pytest.mark.asyncio
+    async def test_lookup_prefix_reports_ipv6_family(self, tools, mock_ripe_stat):
+        """Test that lookup_prefix reports IPv6 address family."""
+        mock_routes = [
+            BGPRoute(
+                prefix="2001:4860::/32",
+                origin_asn=15169,
+                as_path=[3356, 15169],
+                collector="rrc00",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+        ]
+        mock_ripe_stat.get_bgp_state.return_value = mock_routes
+
+        result = await tools.lookup_prefix("2001:4860::/32")
+
+        assert "(IPv6)" in result
+        assert "2001:4860::/32" in result
+
+    @pytest.mark.asyncio
+    async def test_lookup_prefix_not_found_includes_family(self, tools, mock_ripe_stat):
+        """Test that not found message includes address family."""
+        mock_ripe_stat.get_bgp_state.return_value = []
+
+        result_ipv4 = await tools.lookup_prefix("192.0.2.0/24")
+        result_ipv6 = await tools.lookup_prefix("2001:db8::/32")
+
+        assert "IPv4 prefix" in result_ipv4
+        assert "IPv6 prefix" in result_ipv6
+
+
 class TestCheckPrefixAnomalies:
     """Tests for check_prefix_anomalies tool."""
 

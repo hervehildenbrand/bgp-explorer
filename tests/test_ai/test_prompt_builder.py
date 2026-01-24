@@ -243,6 +243,66 @@ class TestPromptBuilderTokenEstimate:
         assert tokens == 25
 
 
+class TestSecurityAndIPv6Awareness:
+    """Tests for security-first methodology and IPv4/IPv6 awareness."""
+
+    def test_security_first_methodology_in_core_prompt(self):
+        """Test that core prompt contains security-first methodology."""
+        builder = PromptBuilder()
+        prompt = builder.build(AvailableTools())
+
+        # Should contain security methodology section
+        assert "SECURITY-FIRST METHODOLOGY" in prompt
+        assert "RPKI" in prompt
+        assert "get_rpki_status" in prompt or "check_prefix_anomalies" in prompt
+
+    def test_rpki_guidance_included(self):
+        """Test that RPKI validation guidance is included."""
+        builder = PromptBuilder()
+        prompt = builder.build(AvailableTools())
+
+        # Should explain RPKI status meanings
+        assert "invalid" in prompt.lower()
+        assert "valid" in prompt.lower()
+        assert "not-found" in prompt.lower() or "not found" in prompt.lower()
+
+    def test_ipv4_ipv6_awareness_in_core_prompt(self):
+        """Test that IPv4/IPv6 awareness guidance is included."""
+        builder = PromptBuilder()
+        prompt = builder.build(AvailableTools())
+
+        # Should contain IPv4/IPv6 awareness section
+        assert "IPv4/IPv6 AWARENESS" in prompt or "IPv4" in prompt
+        assert "IPv6" in prompt
+        assert "address family" in prompt.lower() or "separately" in prompt.lower()
+
+    def test_monocle_section_mentions_ipv4_ipv6(self):
+        """Test that monocle section mentions IPv4/IPv6 for prefix breakdown."""
+        builder = PromptBuilder()
+        prompt = builder.build(AvailableTools(monocle=True))
+
+        # Should mention that AS relationships are address-family agnostic
+        # and point to get_asn_announcements for IPv4/IPv6 breakdown
+        assert "get_asn_announcements" in prompt
+        assert "address-family" in prompt.lower() or "ipv4" in prompt.lower()
+
+    def test_moas_guidance_included(self):
+        """Test that MOAS (Multiple Origin AS) guidance is included."""
+        builder = PromptBuilder()
+        prompt = builder.build(AvailableTools())
+
+        # Should mention MOAS can be legitimate
+        assert "MOAS" in prompt or "multiple origin" in prompt.lower()
+
+    def test_noc_contact_recommendation_for_invalid_rpki(self):
+        """Test that NOC contact is recommended for RPKI invalid."""
+        builder = PromptBuilder()
+        prompt = builder.build(AvailableTools())
+
+        # Should recommend contacting NOC for potential hijacks
+        assert "NOC" in prompt or "contact" in prompt.lower()
+
+
 class TestPromptBuilderIntegration:
     """Integration tests for prompt builder with realistic scenarios."""
 
