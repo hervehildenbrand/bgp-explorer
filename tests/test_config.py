@@ -68,7 +68,7 @@ class TestSettings:
         assert settings.collectors == ["rrc00"]
         assert settings.output_format == OutputFormat.TEXT
         assert settings.save_path is None
-        assert "BGP network analyst" in settings.system_prompt
+        # Note: system_prompt is now built dynamically by PromptBuilder
 
     def test_custom_values(self):
         """Test settings with custom values."""

@@ -156,21 +156,19 @@ class BGPTools:
         return tools
 
     async def search_asn(self, query: str) -> str:
-        """Search for ASNs by organization or company name with fuzzy matching.
+        """Search for ASNs by organization or company name.
 
-        IMPORTANT: Use this tool FIRST when a user asks about a network by name
-        (e.g., "Kentik", "Google", "Cloudflare") without providing an ASN number.
-        This helps find the correct ASN before using other tools.
+        Use this tool FIRST when a user asks about a network by name without
+        providing an ASN number. NEVER guess or assume ASN numbers.
 
-        This tool automatically searches for common variations of the company name
-        (e.g., "Criteo", "Criteo Europe", "Criteo SA") to find all related ASNs.
+        Automatically searches common variations (e.g., "Criteo", "Criteo Europe",
+        "Criteo SA") to find all related ASNs.
 
         Args:
-            query: Organization name or partial name to search for (e.g., "Kentik", "Google").
+            query: Organization name to search (e.g., "Google", "Cloudflare").
 
         Returns:
-            List of matching ASNs with their descriptions. If multiple matches,
-            ask the user to confirm which ASN they meant.
+            List of matching ASNs. If multiple matches, ask user to confirm.
         """
         try:
             # Generate search variations for thorough matching
@@ -529,14 +527,18 @@ class BGPTools:
     async def analyze_as_path(self, prefix: str) -> str:
         """Analyze AS path diversity and characteristics for a prefix.
 
-        Provides detailed analysis of path diversity, upstream providers,
-        transit ASNs, and path length statistics across multiple vantage points.
+        NOTE: This shows PATH DIVERSITY (unique ASNs in collected routes),
+        NOT actual peer count. For peer counts, use get_as_peers() or
+        get_as_connectivity_summary() instead.
+
+        Provides path length statistics, prepending detection, and upstream
+        hop analysis across multiple vantage points.
 
         Args:
             prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24").
 
         Returns:
-            Detailed path analysis including diversity metrics and path characteristics.
+            Path diversity metrics and characteristics.
         """
         try:
             routes = await self._ripe_stat.get_bgp_state(prefix)
@@ -1345,17 +1347,19 @@ class BGPTools:
             return f"Error checking relationship between AS{asn1} and AS{asn2}: {str(e)}"
 
     async def get_as_connectivity_summary(self, asn: int) -> str:
-        """Get a connectivity summary for an AS.
+        """Get a connectivity summary for an AS - USE THIS FOR PEER COUNTS.
+
+        This is the primary tool for answering "how many peers/upstreams/downstreams"
+        questions. Returns accurate counts from observed BGP data.
 
         Shows counts of upstreams, peers, and downstreams with top examples.
-        Provides a comprehensive view of the AS's position in the Internet topology.
         Based on observed BGP routing data across 1,700+ global peers.
 
         Args:
             asn: Autonomous System Number (e.g., 15169 for Google).
 
         Returns:
-            Connectivity summary with neighbor categories and counts.
+            Connectivity summary with accurate neighbor counts and examples.
         """
         if self._monocle is None:
             return "Monocle is not configured. AS relationship data is not available."

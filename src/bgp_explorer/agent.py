@@ -5,6 +5,7 @@ The agent coordinates between the AI backend, data sources, and output formattin
 
 from bgp_explorer.ai.base import AIBackend, ChatCallback
 from bgp_explorer.ai.claude import ClaudeBackend
+from bgp_explorer.ai.prompt_builder import AvailableTools, PromptBuilder
 from bgp_explorer.ai.tools import BGPTools
 from bgp_explorer.config import Settings
 from bgp_explorer.output import OutputFormatter
@@ -99,11 +100,20 @@ class BGPExplorerAgent:
             )
         self._output.display_info("✓ Monocle available (AS relationship data)")
 
+        # Build dynamic system prompt based on available tools
+        available = AvailableTools(
+            bgp_radar=self._bgp_radar is not None,
+            globalping=self._globalping is not None,
+            peeringdb=self._peeringdb is not None,
+            monocle=True,  # Required, already verified above
+        )
+        dynamic_prompt = PromptBuilder().build(available)
+
         # Initialize AI backend (Claude)
         self._ai = ClaudeBackend(
             api_key=self._settings.get_api_key(),
             model=self._settings.claude_model.model_id,
-            system_prompt=self._settings.system_prompt,
+            system_prompt=dynamic_prompt,
             thinking_budget=self._settings.thinking_budget,
             max_tokens=self._settings.max_tokens,
         )
