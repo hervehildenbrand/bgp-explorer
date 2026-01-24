@@ -61,6 +61,13 @@ SAMPLE_PEERINGDB_DUMP = {
                 "info_type": "Content",
                 "website": "https://www.meta.com",
             },
+            {
+                "id": 4,
+                "asn": 35676,
+                "name": "Groupe La Poste France",
+                "info_type": "Enterprise",
+                "website": "https://www.lapostegroupe.com",
+            },
         ]
     },
     "netixlan": {
@@ -158,7 +165,7 @@ class TestPeeringDBClient:
         # Should have loaded data
         assert client_with_data._loaded is True
         assert len(client_with_data._ixp_by_id) == 3
-        assert len(client_with_data._asn_to_net) == 3
+        assert len(client_with_data._asn_to_net) == 4  # Google, Cloudflare, Meta, La Poste
 
         await client_with_data.disconnect()
 
@@ -288,6 +295,55 @@ class TestPeeringDBClient:
         results3 = client_with_data.search_ixps("Ams-Ix")
 
         assert len(results1) == len(results2) == len(results3)
+
+        await client_with_data.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_search_networks_by_name(self, client_with_data):
+        """Test searching for networks by name."""
+        await client_with_data.connect()
+
+        # Search for "La Poste" should find "Groupe La Poste France"
+        results = client_with_data.search_networks("La Poste")
+        assert len(results) >= 1
+        assert any(n.asn == 35676 for n in results)
+        assert any("Poste" in n.name for n in results)
+
+        await client_with_data.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_search_networks_case_insensitive(self, client_with_data):
+        """Test that network search is case-insensitive."""
+        await client_with_data.connect()
+
+        results1 = client_with_data.search_networks("google")
+        results2 = client_with_data.search_networks("GOOGLE")
+        results3 = client_with_data.search_networks("Google")
+
+        assert len(results1) == len(results2) == len(results3)
+        assert len(results1) >= 1
+
+        await client_with_data.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_search_networks_partial_match(self, client_with_data):
+        """Test that partial name matches work."""
+        await client_with_data.connect()
+
+        # "cloud" should match "Cloudflare, Inc."
+        results = client_with_data.search_networks("cloud")
+        assert len(results) >= 1
+        assert any(n.asn == 13335 for n in results)
+
+        await client_with_data.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_search_networks_no_results(self, client_with_data):
+        """Test search with no matches returns empty list."""
+        await client_with_data.connect()
+
+        results = client_with_data.search_networks("NonExistentNetwork12345")
+        assert results == []
 
         await client_with_data.disconnect()
 

@@ -156,21 +156,19 @@ class BGPTools:
         return tools
 
     async def search_asn(self, query: str) -> str:
-        """Search for ASNs by organization or company name with fuzzy matching.
+        """Search for ASNs by organization or company name.
 
-        IMPORTANT: Use this tool FIRST when a user asks about a network by name
-        (e.g., "Kentik", "Google", "Cloudflare") without providing an ASN number.
-        This helps find the correct ASN before using other tools.
+        Use this tool FIRST when a user asks about a network by name without
+        providing an ASN number. NEVER guess or assume ASN numbers.
 
-        This tool automatically searches for common variations of the company name
-        (e.g., "Criteo", "Criteo Europe", "Criteo SA") to find all related ASNs.
+        Automatically searches common variations (e.g., "Criteo", "Criteo Europe",
+        "Criteo SA") to find all related ASNs.
 
         Args:
-            query: Organization name or partial name to search for (e.g., "Kentik", "Google").
+            query: Organization name to search (e.g., "Google", "Cloudflare").
 
         Returns:
-            List of matching ASNs with their descriptions. If multiple matches,
-            ask the user to confirm which ASN they meant.
+            List of matching ASNs. If multiple matches, ask user to confirm.
         """
         try:
             # Generate search variations for thorough matching
@@ -208,6 +206,20 @@ class BGPTools:
                 except Exception:
                     # Continue with other variations if one fails
                     continue
+
+            # If RIPE Stat found nothing, try PeeringDB as fallback
+            if not all_results and self._peeringdb is not None:
+                try:
+                    pdb_results = self._peeringdb.search_networks(query)
+                    for network in pdb_results:
+                        if network.asn not in seen_asns:
+                            seen_asns.add(network.asn)
+                            all_results.append({
+                                "asn": network.asn,
+                                "description": f"{network.name} (via PeeringDB)",
+                            })
+                except Exception:
+                    pass  # PeeringDB search failed, continue without it
 
             if not all_results:
                 return (
@@ -257,6 +269,7 @@ class BGPTools:
 
         Returns the origin ASN, AS paths from multiple vantage points,
         and visibility information for the specified prefix.
+        Auto-detects and reports whether this is an IPv4 or IPv6 prefix.
 
         Args:
             prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24" or "2001:db8::/32").
@@ -267,8 +280,12 @@ class BGPTools:
         try:
             routes = await self._ripe_stat.get_bgp_state(prefix)
 
+            # Detect address family
+            is_ipv6 = ":" in prefix
+            family_str = "IPv6" if is_ipv6 else "IPv4"
+
             if not routes:
-                return f"No routes found for prefix {prefix}. The prefix may not be announced or visible from RIPE RIS collectors."
+                return f"No routes found for {family_str} prefix {prefix}. The prefix may not be announced or visible from RIPE RIS collectors."
 
             # Summarize the results
             origin_asns = set(r.origin_asn for r in routes)
@@ -276,7 +293,7 @@ class BGPTools:
             unique_paths = set(tuple(r.as_path) for r in routes)
 
             summary = [
-                f"**Prefix: {prefix}**",
+                f"**Prefix: {prefix}** ({family_str})",
                 "",
                 f"**Origin ASN(s):** {', '.join(f'AS{asn}' for asn in sorted(origin_asns))}",
                 f"**Visible from:** {len(collectors)} collectors ({', '.join(sorted(collectors)[:5])}{'...' if len(collectors) > 5 else ''})",
@@ -295,17 +312,22 @@ class BGPTools:
         except Exception as e:
             return f"Error looking up prefix {prefix}: {str(e)}"
 
-    async def get_asn_announcements(self, asn: int) -> str:
-        """Get all prefixes announced by an Autonomous System.
+    async def get_asn_announcements(
+        self, asn: int, address_family: int | None = None
+    ) -> str:
+        """Get prefixes announced by an AS, optionally filtered by address family.
 
         Returns a list of IP prefixes that are currently originated
-        by the specified ASN.
+        by the specified ASN. Always reports IPv4 and IPv6 counts separately.
 
         Args:
             asn: Autonomous System Number (e.g., 15169 for Google).
+            address_family: Optional filter - 4 for IPv4 only, 6 for IPv6 only,
+                           None for both (default).
 
         Returns:
-            List of prefixes announced by the ASN.
+            List of prefixes announced by the ASN, separated by address family.
+            Use address_family filter when user specifically asks about one protocol.
         """
         try:
             prefixes = await self._ripe_stat.get_announced_prefixes(asn)
@@ -317,6 +339,17 @@ class BGPTools:
             ipv4 = [p for p in prefixes if ":" not in p]
             ipv6 = [p for p in prefixes if ":" in p]
 
+            # Apply address family filter if specified
+            if address_family == 4:
+                filtered_prefixes = ipv4
+                family_label = "IPv4"
+            elif address_family == 6:
+                filtered_prefixes = ipv6
+                family_label = "IPv6"
+            else:
+                filtered_prefixes = None  # Show both
+                family_label = None
+
             summary = [
                 f"**AS{asn} Announcements**",
                 "",
@@ -326,20 +359,29 @@ class BGPTools:
                 "",
             ]
 
-            if ipv4:
-                summary.append("**IPv4 prefixes (sample):**")
-                for p in ipv4[:10]:
+            if filtered_prefixes is not None:
+                # Filtered view - show only requested family
+                summary.append(f"**{family_label} prefixes (filtered):**")
+                for p in filtered_prefixes[:15]:
                     summary.append(f"  - {p}")
-                if len(ipv4) > 10:
-                    summary.append(f"  ... and {len(ipv4) - 10} more")
-                summary.append("")
+                if len(filtered_prefixes) > 15:
+                    summary.append(f"  ... and {len(filtered_prefixes) - 15} more")
+            else:
+                # Default view - show both families
+                if ipv4:
+                    summary.append("**IPv4 prefixes (sample):**")
+                    for p in ipv4[:10]:
+                        summary.append(f"  - {p}")
+                    if len(ipv4) > 10:
+                        summary.append(f"  ... and {len(ipv4) - 10} more")
+                    summary.append("")
 
-            if ipv6:
-                summary.append("**IPv6 prefixes (sample):**")
-                for p in ipv6[:5]:
-                    summary.append(f"  - {p}")
-                if len(ipv6) > 5:
-                    summary.append(f"  ... and {len(ipv6) - 5} more")
+                if ipv6:
+                    summary.append("**IPv6 prefixes (sample):**")
+                    for p in ipv6[:5]:
+                        summary.append(f"  - {p}")
+                    if len(ipv6) > 5:
+                        summary.append(f"  ... and {len(ipv6) - 5} more")
 
             return "\n".join(summary)
 
@@ -480,15 +522,21 @@ class BGPTools:
     async def get_rpki_status(self, prefix: str, origin_asn: int) -> str:
         """Check RPKI validation status for a prefix/origin pair.
 
+        **USE PROACTIVELY** - Always check RPKI when investigating prefixes.
+        Include RPKI status in every prefix report without waiting to be asked.
+
         Validates whether the prefix announcement from the given
         origin ASN is covered by a valid ROA (Route Origin Authorization).
 
         Args:
-            prefix: IP prefix in CIDR notation.
+            prefix: IP prefix in CIDR notation (works for both IPv4 and IPv6).
             origin_asn: The AS number claiming to originate the prefix.
 
         Returns:
-            RPKI validation status: valid, invalid, or not-found.
+            RPKI validation status:
+            - valid: ROA exists and matches - legitimate announcement
+            - invalid: ROA exists but DOESN'T match - potential hijack!
+            - not-found: No ROA - owner hasn't deployed RPKI (common, not necessarily bad)
         """
         try:
             status = await self._ripe_stat.get_rpki_validation(prefix, origin_asn)
@@ -529,14 +577,18 @@ class BGPTools:
     async def analyze_as_path(self, prefix: str) -> str:
         """Analyze AS path diversity and characteristics for a prefix.
 
-        Provides detailed analysis of path diversity, upstream providers,
-        transit ASNs, and path length statistics across multiple vantage points.
+        NOTE: This shows PATH DIVERSITY (unique ASNs in collected routes),
+        NOT actual peer count. For peer counts, use get_as_peers() or
+        get_as_connectivity_summary() instead.
+
+        Provides path length statistics, prepending detection, and upstream
+        hop analysis across multiple vantage points.
 
         Args:
             prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24").
 
         Returns:
-            Detailed path analysis including diversity metrics and path characteristics.
+            Path diversity metrics and characteristics.
         """
         try:
             routes = await self._ripe_stat.get_bgp_state(prefix)
@@ -648,12 +700,16 @@ class BGPTools:
 
         Provides comprehensive analysis including announced prefixes,
         upstream/downstream relationships, and routing behavior.
+        Always reports IPv4 and IPv6 prefix counts separately.
+
+        For security analysis, use check_prefix_anomalies() on sample prefixes
+        from BOTH IPv4 and IPv6 families, as RPKI deployment may differ.
 
         Args:
             asn: Autonomous System Number (e.g., 15169 for Google).
 
         Returns:
-            Detailed ASN analysis and statistics.
+            Detailed ASN analysis with IPv4/IPv6 breakdown and routing statistics.
         """
         try:
             # Get prefixes announced by this ASN
@@ -1345,17 +1401,19 @@ class BGPTools:
             return f"Error checking relationship between AS{asn1} and AS{asn2}: {str(e)}"
 
     async def get_as_connectivity_summary(self, asn: int) -> str:
-        """Get a connectivity summary for an AS.
+        """Get a connectivity summary for an AS - USE THIS FOR PEER COUNTS.
+
+        This is the primary tool for answering "how many peers/upstreams/downstreams"
+        questions. Returns accurate counts from observed BGP data.
 
         Shows counts of upstreams, peers, and downstreams with top examples.
-        Provides a comprehensive view of the AS's position in the Internet topology.
         Based on observed BGP routing data across 1,700+ global peers.
 
         Args:
             asn: Autonomous System Number (e.g., 15169 for Google).
 
         Returns:
-            Connectivity summary with neighbor categories and counts.
+            Connectivity summary with accurate neighbor counts and examples.
         """
         if self._monocle is None:
             return "Monocle is not configured. AS relationship data is not available."
@@ -1466,6 +1524,8 @@ class BGPTools:
         """Check a prefix for potential hijack indicators using RIPE Stat.
 
         This tool provides on-demand anomaly detection WITHOUT requiring bgp-radar.
+        Works for both IPv4 and IPv6 prefixes.
+
         It checks multiple indicators that may suggest a BGP hijack or misconfiguration:
 
         1. **MOAS Detection**: Multiple Origin AS - if more than one AS is announcing
@@ -1481,8 +1541,11 @@ class BGPTools:
         - Checking if a prefix has anomalous routing behavior
         - The user asks to "check for hijacks" or "verify a prefix"
 
+        When investigating an ASN's security posture, check representative prefixes
+        from BOTH IPv4 and IPv6 address families as RPKI deployment may differ.
+
         Args:
-            prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24").
+            prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24" or "2001:db8::/32").
 
         Returns:
             Analysis with risk level (low/medium/high) and detailed indicators.
