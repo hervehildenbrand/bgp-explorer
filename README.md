@@ -55,7 +55,7 @@ claude
 > Ping 1.1.1.1 from Asia
 ```
 
-**How it works:** The MCP server exposes 17 BGP investigation tools. All AI processing uses your Claude Code subscription - no separate API costs.
+**How it works:** The MCP server exposes 23 BGP investigation tools. All AI processing uses your Claude Code subscription - no separate API costs.
 
 See [Claude Code Integration](https://github.com/hervehildenbrand/bgp-explorer/wiki/Claude-Code-Integration) in the wiki for details.
 
