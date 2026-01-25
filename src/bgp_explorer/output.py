@@ -87,6 +87,11 @@ AI-powered assistant for BGP routing investigation.
 - Is AS13335 a peer of AS3356?
 - Show downstream customers of Level3
 
+**Network Resilience Assessment**
+- Assess the resilience of AS15169
+- How resilient is Cloudflare's network?
+- Check if AS64496 has good transit diversity
+
 **Historical Analysis** (requires BGPStream)
 - What happened to 1.2.3.0/24 on January 15th?
 - Show routing history for AS64496 last week
