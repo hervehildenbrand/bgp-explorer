@@ -124,7 +124,9 @@ def get_as_analyzer() -> ASAnalyzer:
 
 @mcp.tool()
 async def search_asn(
-    query: Annotated[str, Field(description="Organization name to search (e.g., 'Google', 'Cloudflare')")]
+    query: Annotated[
+        str, Field(description="Organization name to search (e.g., 'Google', 'Cloudflare')")
+    ],
 ) -> str:
     """Search for ASNs by organization or company name.
 
@@ -140,7 +142,18 @@ async def search_asn(
 
         # Generate search variations for thorough matching
         variations = [query]
-        common_suffixes = ["Europe", "France", "US", "USA", "Corp", "Inc", "SA", "Ltd", "GmbH", "LLC"]
+        common_suffixes = [
+            "Europe",
+            "France",
+            "US",
+            "USA",
+            "Corp",
+            "Inc",
+            "SA",
+            "Ltd",
+            "GmbH",
+            "LLC",
+        ]
         for suffix in common_suffixes:
             if suffix.lower() not in query.lower():
                 variations.append(f"{query} {suffix}")
@@ -169,10 +182,12 @@ async def search_asn(
                     for network in pdb_results:
                         if network.asn not in seen_asns:
                             seen_asns.add(network.asn)
-                            all_results.append({
-                                "asn": network.asn,
-                                "description": f"{network.name} (via PeeringDB)",
-                            })
+                            all_results.append(
+                                {
+                                    "asn": network.asn,
+                                    "description": f"{network.name} (via PeeringDB)",
+                                }
+                            )
             except Exception:
                 pass  # PeeringDB search failed, continue without it
 
@@ -218,7 +233,9 @@ async def search_asn(
 
 @mcp.tool()
 async def lookup_prefix(
-    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")]
+    prefix: Annotated[
+        str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")
+    ],
 ) -> str:
     """Look up BGP routing information for an IP prefix.
 
@@ -263,7 +280,7 @@ async def lookup_prefix(
 
 @mcp.tool()
 async def get_asn_announcements(
-    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")]
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
 ) -> str:
     """Get all prefixes announced by an Autonomous System.
 
@@ -313,7 +330,9 @@ async def get_asn_announcements(
 
 @mcp.tool()
 async def get_routing_history(
-    resource: Annotated[str, Field(description="IP prefix (e.g., '8.8.8.0/24') or ASN (e.g., 'AS15169')")],
+    resource: Annotated[
+        str, Field(description="IP prefix (e.g., '8.8.8.0/24') or ASN (e.g., 'AS15169')")
+    ],
     start_date: Annotated[str, Field(description="Start date in ISO format (YYYY-MM-DD)")],
     end_date: Annotated[str, Field(description="End date in ISO format (YYYY-MM-DD)")],
 ) -> str:
@@ -412,7 +431,7 @@ async def get_rpki_status(
 
 @mcp.tool()
 async def analyze_as_path(
-    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")]
+    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")],
 ) -> str:
     """Analyze AS path diversity and characteristics for a prefix.
 
@@ -477,7 +496,7 @@ async def analyze_as_path(
 
 @mcp.tool()
 async def get_asn_details(
-    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")]
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
 ) -> str:
     """Get detailed information about an Autonomous System.
 
@@ -531,7 +550,9 @@ async def get_asn_details(
 
         if asn_summary["downstream_asns"]:
             summary.append(f"**Downstream Customers:** {len(asn_summary['downstream_asns'])}")
-            downstream_list = ", ".join(f"AS{d}" for d in sorted(asn_summary["downstream_asns"])[:10])
+            downstream_list = ", ".join(
+                f"AS{d}" for d in sorted(asn_summary["downstream_asns"])[:10]
+            )
             summary.append(f"  {downstream_list}")
             summary.append("")
 
@@ -548,7 +569,9 @@ async def get_asn_details(
 
 @mcp.tool()
 async def check_prefix_anomalies(
-    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")]
+    prefix: Annotated[
+        str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")
+    ],
 ) -> str:
     """Check a prefix for potential hijack indicators.
 
@@ -703,7 +726,7 @@ async def check_prefix_anomalies(
 
 @mcp.tool()
 async def get_as_peers(
-    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")]
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
 ) -> str:
     """Get all peers for an Autonomous System.
 
@@ -746,7 +769,7 @@ async def get_as_peers(
 
 @mcp.tool()
 async def get_as_upstreams(
-    asn: Annotated[int, Field(description="Autonomous System Number")]
+    asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
     """Get upstream transit providers for an AS.
 
@@ -775,7 +798,9 @@ async def get_as_upstreams(
         sorted_upstreams = sorted(upstreams, key=lambda u: u.connected_pct, reverse=True)
         for upstream in sorted_upstreams:
             name_str = f" ({upstream.asn2_name})" if upstream.asn2_name else ""
-            summary.append(f"  - AS{upstream.asn2}{name_str}: {upstream.connected_pct:.1f}% visibility")
+            summary.append(
+                f"  - AS{upstream.asn2}{name_str}: {upstream.connected_pct:.1f}% visibility"
+            )
 
         return "\n".join(summary)
 
@@ -785,7 +810,7 @@ async def get_as_upstreams(
 
 @mcp.tool()
 async def get_as_downstreams(
-    asn: Annotated[int, Field(description="Autonomous System Number")]
+    asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
     """Get downstream customers of an AS.
 
@@ -814,7 +839,9 @@ async def get_as_downstreams(
         sorted_downstreams = sorted(downstreams, key=lambda d: d.connected_pct, reverse=True)
         for downstream in sorted_downstreams[:30]:
             name_str = f" ({downstream.asn2_name})" if downstream.asn2_name else ""
-            summary.append(f"  - AS{downstream.asn2}{name_str}: {downstream.connected_pct:.1f}% visibility")
+            summary.append(
+                f"  - AS{downstream.asn2}{name_str}: {downstream.connected_pct:.1f}% visibility"
+            )
 
         if len(downstreams) > 30:
             summary.append(f"  ... and {len(downstreams) - 30} more customers")
@@ -864,7 +891,9 @@ async def check_as_relationship(
         ]
 
         if rel_type == "peer":
-            summary.append(f"AS{asn1} and AS{asn2} exchange traffic as peers (settlement-free peering).")
+            summary.append(
+                f"AS{asn1} and AS{asn2} exchange traffic as peers (settlement-free peering)."
+            )
         elif rel_type == "upstream":
             summary.append(f"AS{asn2} provides transit to AS{asn1} (AS{asn2} is a provider).")
         elif rel_type == "downstream":
@@ -878,7 +907,7 @@ async def check_as_relationship(
 
 @mcp.tool()
 async def get_as_connectivity_summary(
-    asn: Annotated[int, Field(description="Autonomous System Number")]
+    asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
     """Get a connectivity summary for an AS.
 
@@ -905,7 +934,9 @@ async def get_as_connectivity_summary(
         summary.append(f"**Upstreams (Transit Providers):** {len(connectivity.upstreams)}")
         for upstream in connectivity.upstreams[:5]:
             name_str = f" {upstream.name}" if upstream.name else ""
-            summary.append(f"  - AS{upstream.asn}{name_str} ({upstream.peers_percent:.1f}% visibility)")
+            summary.append(
+                f"  - AS{upstream.asn}{name_str} ({upstream.peers_percent:.1f}% visibility)"
+            )
         if len(connectivity.upstreams) > 5:
             summary.append(f"  ... and {len(connectivity.upstreams) - 5} more")
         summary.append("")
@@ -923,7 +954,9 @@ async def get_as_connectivity_summary(
         summary.append(f"**Downstreams (Customers):** {len(connectivity.downstreams)}")
         for downstream in connectivity.downstreams[:5]:
             name_str = f" {downstream.name}" if downstream.name else ""
-            summary.append(f"  - AS{downstream.asn}{name_str} ({downstream.peers_percent:.1f}% visibility)")
+            summary.append(
+                f"  - AS{downstream.asn}{name_str} ({downstream.peers_percent:.1f}% visibility)"
+            )
         if len(connectivity.downstreams) > 5:
             summary.append(f"  ... and {len(connectivity.downstreams) - 5} more")
 
@@ -1061,9 +1094,7 @@ async def traceroute_from_global(
                 for i, hop in enumerate(probe_result.hops[:15], 1):
                     hop_num = hop.get("hop", i)
                     host = (
-                        hop.get("resolvedHostname")
-                        or hop.get("resolvedAddress")
-                        or hop.get("host")
+                        hop.get("resolvedHostname") or hop.get("resolvedAddress") or hop.get("host")
                     )
                     timings = hop.get("timings", [])
                     if timings and isinstance(timings, list) and len(timings) > 0:
@@ -1109,7 +1140,7 @@ async def traceroute_from_global(
 
 @mcp.tool()
 async def get_ixps_for_asn(
-    asn: Annotated[int, Field(description="Autonomous System Number")]
+    asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
     """Get all Internet Exchange Points where an ASN is present.
 
@@ -1156,7 +1187,7 @@ async def get_ixps_for_asn(
 
 @mcp.tool()
 async def get_network_contacts(
-    asn: Annotated[int, Field(description="Autonomous System Number")]
+    asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
     """Get contact information for a network from PeeringDB.
 

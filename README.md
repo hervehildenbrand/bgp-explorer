@@ -29,6 +29,7 @@ AI-powered CLI for querying live and historical internet routing data using natu
 - **RPKI Validation**: Check route origin validation status
 - **Anomaly Detection**: Real-time hijack, route leak, and blackhole detection
 - **On-Demand Hijack Detection**: Check any prefix for potential hijacks without bgp-radar (MOAS, RPKI, origin changes)
+- **Network Resilience Assessment**: Score (1-10) any network's resilience based on transit diversity, peering, IXP presence
 
 ## Quick Start
 
@@ -37,7 +38,7 @@ git clone https://github.com/hervehildenbrand/bgp-explorer.git
 cd bgp-explorer
 uv sync
 uv run bgp-explorer install-deps  # Auto-installs Go + Rust + binaries
-uv run bgp-explorer chat          # All 23 tools ready!
+uv run bgp-explorer chat          # All 24 tools ready!
 ```
 
 ## Use with Claude Code (No API Key Needed)
@@ -182,6 +183,13 @@ Options:
 > Is AS12345 a legitimate provider?
 ```
 
+### Network Resilience Assessment
+```
+> Assess the resilience of AS15169
+> How resilient is Cloudflare's network?
+> Check if AS64496 has good transit diversity
+```
+
 ### Incident Investigation
 ```
 > Our customers can't reach our prefix 203.0.113.0/24
@@ -189,7 +197,7 @@ Options:
 > Should we peer with AS64496?
 ```
 
-## Available Tools (23 total)
+## Available Tools (24 total)
 
 | Tool | Description |
 |------|-------------|
@@ -210,6 +218,7 @@ Options:
 | `get_network_contacts` | Get NOC/abuse contacts from PeeringDB |
 | `search_asn` | Search for ASN by name or description |
 | `get_ixp_presence` | Get IXP presence for an ASN |
+| `assess_network_resilience` | Score network resilience (1-10) with transit, peering, IXP analysis |
 
 ## Commands
 
@@ -217,6 +226,7 @@ Options:
 ```bash
 uv run bgp-explorer install-deps  # Auto-install Go, Rust, bgp-radar, monocle
 uv run bgp-explorer chat          # Start interactive chat (requires API key)
+uv run bgp-explorer assess <asn>  # Assess network resilience for an ASN
 uv run bgp-explorer mcp           # Start MCP server for Claude Code integration
 ```
 
@@ -288,9 +298,12 @@ src/bgp_explorer/
 │   ├── bgp_radar.py   # bgp-radar subprocess
 │   ├── globalping.py  # Globalping REST API
 │   └── bgpstream.py   # BGPStream wrapper
+├── data/            # Static data
+│   └── ddos_providers.py # Known DDoS provider ASNs
 ├── analysis/        # Analysis utilities
 │   ├── path_analysis.py  # AS path analysis
-│   └── as_analysis.py    # ASN relationship analysis
+│   ├── as_analysis.py    # ASN relationship analysis
+│   └── resilience.py     # Network resilience assessment
 └── ai/              # AI backends
     ├── base.py      # Abstract base class
     ├── claude.py    # Claude implementation

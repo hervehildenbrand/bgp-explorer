@@ -17,8 +17,11 @@ from prompt_toolkit.styles import Style
 
 from bgp_explorer.agent import BGPExplorerAgent
 from bgp_explorer.ai.base import ChatEvent
+from bgp_explorer.analysis.resilience import ResilienceAssessor
 from bgp_explorer.config import ClaudeModel, OutputFormat, load_settings
 from bgp_explorer.output import OutputFormatter
+from bgp_explorer.sources.monocle import MonocleClient
+from bgp_explorer.sources.peeringdb import PeeringDBClient
 
 # Command definitions with descriptions
 COMMANDS = {
@@ -415,6 +418,144 @@ def mcp():
     from bgp_explorer.mcp_server import main as run_mcp
 
     run_mcp()
+
+
+@cli.command()
+@click.argument("asn", type=int)
+def assess(asn: int):
+    """Assess network resilience for an ASN.
+
+    Produces a resilience score (1-10) plus detailed report with recommendations.
+    Evaluates transit diversity, peering breadth, IXP presence, and path redundancy.
+
+    Example:
+        bgp-explorer assess 15169  # Assess Google's resilience
+        bgp-explorer assess 13335  # Assess Cloudflare (should detect self-DDoS)
+
+    Requires:
+        - monocle: For AS relationship data (install with: cargo install monocle)
+        - PeeringDB: For IXP presence data (downloaded automatically)
+    """
+    # Load environment
+    load_dotenv()
+
+    try:
+        result = asyncio.run(run_assess(asn))
+        click.echo(result)
+    except KeyboardInterrupt:
+        click.echo("\nAssessment cancelled.")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        sys.exit(1)
+
+
+async def run_assess(asn: int) -> str:
+    """Run the resilience assessment for an ASN.
+
+    Args:
+        asn: Autonomous System Number to assess.
+
+    Returns:
+        Formatted resilience report.
+    """
+    from rich.console import Console
+
+    console = Console()
+
+    # Initialize Monocle
+    monocle = MonocleClient()
+    if not await monocle.is_available():
+        return (
+            "Error: Monocle is not installed or not in PATH.\n"
+            "Install with: cargo install monocle\n"
+            "Or run: bgp-explorer install-deps"
+        )
+
+    # Initialize PeeringDB
+    peeringdb = PeeringDBClient(console=console)
+    try:
+        await peeringdb.connect()
+    except Exception as e:
+        return f"Error connecting to PeeringDB: {e}"
+
+    try:
+        # Get data from sources
+        console.print(f"[cyan]Fetching data for AS{asn}...[/cyan]")
+
+        upstreams = await monocle.get_as_upstreams(asn)
+        peers = await monocle.get_as_peers(asn)
+        ixps = peeringdb.get_ixps_for_asn(asn)
+
+        # Create assessor and run assessment
+        assessor = ResilienceAssessor()
+
+        # Calculate component scores
+        transit_score, transit_issues = assessor._score_transit(upstreams)
+        peering_score, peer_count = assessor._score_peering(peers)
+        ixp_score, ixp_names = assessor._score_ixp(ixps)
+
+        # Use transit diversity as proxy for path redundancy
+        path_redundancy_score = transit_score
+
+        # Check for DDoS provider
+        ddos_provider = assessor._detect_ddos_provider(upstreams)
+
+        # Check for single transit
+        single_transit = len(upstreams) == 1
+
+        # Build scores and flags
+        scores = {
+            "transit": transit_score,
+            "peering": peering_score,
+            "ixp": ixp_score,
+            "path_redundancy": path_redundancy_score,
+        }
+        flags = {
+            "single_transit": single_transit,
+            "ddos_provider": ddos_provider,
+        }
+
+        # Calculate final score
+        final_score = assessor._calculate_final_score(scores, flags)
+
+        # Build upstream names
+        upstream_names = []
+        for u in upstreams[:10]:
+            name = f"AS{u.asn2}"
+            if u.asn2_name:
+                name += f" ({u.asn2_name})"
+            upstream_names.append(name)
+
+        # Build report
+        from bgp_explorer.analysis.resilience import ResilienceReport
+
+        report = ResilienceReport(
+            asn=asn,
+            score=final_score,
+            transit_score=transit_score,
+            peering_score=peering_score,
+            ixp_score=ixp_score,
+            path_redundancy_score=path_redundancy_score,
+            upstream_count=len(upstreams),
+            peer_count=peer_count,
+            ixp_count=len(ixps),
+            upstreams=upstream_names,
+            ixps=ixp_names,
+            issues=transit_issues,
+            recommendations=[],
+            single_transit=single_transit,
+            ddos_provider_detected=ddos_provider,
+        )
+
+        # Generate recommendations
+        report.recommendations = assessor._generate_recommendations(report)
+
+        # Format and return report
+        return assessor.format_report(report)
+
+    finally:
+        await peeringdb.disconnect()
 
 
 @cli.command()

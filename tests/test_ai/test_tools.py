@@ -596,9 +596,7 @@ class TestSearchAsnPeeringDBFallback:
     ):
         """Test that RIPE Stat results are used when available."""
         # RIPE Stat returns results
-        mock_ripe_stat.search_asn.return_value = [
-            {"asn": 15169, "description": "Google LLC"}
-        ]
+        mock_ripe_stat.search_asn.return_value = [{"asn": 15169, "description": "Google LLC"}]
 
         result = await tools_with_peeringdb.search_asn("Google")
 
@@ -821,3 +819,204 @@ class TestCheckPrefixAnomalies:
         assert "hijack" in tools.check_prefix_anomalies.__doc__.lower()
         assert "MOAS" in tools.check_prefix_anomalies.__doc__
         assert "RPKI" in tools.check_prefix_anomalies.__doc__
+
+
+class TestAssessNetworkResilience:
+    """Tests for assess_network_resilience tool."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        """Create a mock RIPE Stat client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def mock_monocle(self):
+        """Create a mock Monocle client."""
+        from bgp_explorer.models.as_relationship import ASRelationship
+
+        mock = AsyncMock()
+
+        # Default: 3 upstreams, 50 peers
+        mock.get_as_upstreams.return_value = [
+            ASRelationship(
+                asn1=64496,
+                asn2=3356,
+                asn2_name="Lumen",
+                connected_pct=80.0,
+                peer_pct=0.0,
+                as1_upstream_pct=0.0,
+                as2_upstream_pct=100.0,
+            ),
+            ASRelationship(
+                asn1=64496,
+                asn2=174,
+                asn2_name="Cogent",
+                connected_pct=70.0,
+                peer_pct=0.0,
+                as1_upstream_pct=0.0,
+                as2_upstream_pct=100.0,
+            ),
+            ASRelationship(
+                asn1=64496,
+                asn2=6939,
+                asn2_name="Hurricane Electric",
+                connected_pct=60.0,
+                peer_pct=0.0,
+                as1_upstream_pct=0.0,
+                as2_upstream_pct=100.0,
+            ),
+        ]
+
+        mock.get_as_peers.return_value = [
+            ASRelationship(
+                asn1=64496,
+                asn2=64500 + i,
+                asn2_name=f"Peer{i}",
+                connected_pct=50.0,
+                peer_pct=100.0,
+                as1_upstream_pct=0.0,
+                as2_upstream_pct=0.0,
+            )
+            for i in range(50)
+        ]
+
+        return mock
+
+    @pytest.fixture
+    def mock_peeringdb(self):
+        """Create a mock PeeringDB client."""
+        from bgp_explorer.models.ixp import IXPPresence
+
+        mock = MagicMock()
+        mock._loaded = True
+
+        # Default: 4 IXPs
+        mock.get_ixps_for_asn.return_value = [
+            IXPPresence(asn=64496, ixp_id=1, ixp_name="AMS-IX", speed=10000),
+            IXPPresence(asn=64496, ixp_id=2, ixp_name="DE-CIX Frankfurt", speed=10000),
+            IXPPresence(asn=64496, ixp_id=3, ixp_name="LINX LON1", speed=10000),
+            IXPPresence(asn=64496, ixp_id=4, ixp_name="Equinix Ashburn", speed=10000),
+        ]
+
+        return mock
+
+    @pytest.fixture
+    def tools_full(self, mock_ripe_stat, mock_monocle, mock_peeringdb):
+        """Create BGPTools instance with all clients."""
+        return BGPTools(
+            ripe_stat=mock_ripe_stat,
+            monocle=mock_monocle,
+            peeringdb=mock_peeringdb,
+        )
+
+    @pytest.mark.asyncio
+    async def test_assess_network_resilience_good_score(
+        self, tools_full, mock_monocle, mock_peeringdb
+    ):
+        """Test assessing a network with good resilience."""
+        result = await tools_full.assess_network_resilience(64496)
+
+        assert "64496" in result
+        assert "Score" in result
+        # Should have good score with 3 upstreams, 50 peers, 4 IXPs
+        assert "Transit Diversity" in result
+        assert "Peering Breadth" in result
+        assert "IXP Presence" in result
+
+    @pytest.mark.asyncio
+    async def test_assess_network_resilience_single_transit(
+        self, tools_full, mock_monocle, mock_peeringdb
+    ):
+        """Test that single transit provider results in capped score."""
+        from bgp_explorer.models.as_relationship import ASRelationship
+
+        # Only 1 upstream
+        mock_monocle.get_as_upstreams.return_value = [
+            ASRelationship(
+                asn1=64496,
+                asn2=3356,
+                asn2_name="Lumen",
+                connected_pct=80.0,
+                peer_pct=0.0,
+                as1_upstream_pct=0.0,
+                as2_upstream_pct=100.0,
+            ),
+        ]
+
+        result = await tools_full.assess_network_resilience(64496)
+
+        assert "single" in result.lower()
+        assert "capped" in result.lower() or "5" in result
+
+    @pytest.mark.asyncio
+    async def test_assess_network_resilience_ddos_provider_detected(
+        self, tools_full, mock_monocle, mock_peeringdb
+    ):
+        """Test that DDoS provider in upstream is detected."""
+        from bgp_explorer.models.as_relationship import ASRelationship
+
+        # Include Cloudflare (13335) as upstream
+        mock_monocle.get_as_upstreams.return_value = [
+            ASRelationship(
+                asn1=64496,
+                asn2=13335,
+                asn2_name="Cloudflare",
+                connected_pct=80.0,
+                peer_pct=0.0,
+                as1_upstream_pct=0.0,
+                as2_upstream_pct=100.0,
+            ),
+            ASRelationship(
+                asn1=64496,
+                asn2=3356,
+                asn2_name="Lumen",
+                connected_pct=70.0,
+                peer_pct=0.0,
+                as1_upstream_pct=0.0,
+                as2_upstream_pct=100.0,
+            ),
+        ]
+
+        result = await tools_full.assess_network_resilience(64496)
+
+        assert "Cloudflare" in result
+        assert "DDoS" in result or "capped" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_assess_network_resilience_requires_monocle(self, mock_ripe_stat, mock_peeringdb):
+        """Test that tool requires Monocle to be configured."""
+        tools = BGPTools(
+            ripe_stat=mock_ripe_stat,
+            monocle=None,
+            peeringdb=mock_peeringdb,
+        )
+
+        result = await tools.assess_network_resilience(64496)
+
+        assert "not configured" in result.lower() or "not available" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_assess_network_resilience_requires_peeringdb(self, mock_ripe_stat, mock_monocle):
+        """Test that tool requires PeeringDB to be configured."""
+        tools = BGPTools(
+            ripe_stat=mock_ripe_stat,
+            monocle=mock_monocle,
+            peeringdb=None,
+        )
+
+        result = await tools.assess_network_resilience(64496)
+
+        assert "not configured" in result.lower() or "not available" in result.lower()
+
+    def test_assess_network_resilience_in_tools_list(self, tools_full):
+        """Test that assess_network_resilience is in the tools list."""
+        tool_funcs = tools_full.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "assess_network_resilience" in tool_names
+
+    def test_assess_network_resilience_has_docstring(self, tools_full):
+        """Test that assess_network_resilience has a proper docstring."""
+        assert tools_full.assess_network_resilience.__doc__ is not None
+        assert "resilience" in tools_full.assess_network_resilience.__doc__.lower()
+        assert "score" in tools_full.assess_network_resilience.__doc__.lower()

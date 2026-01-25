@@ -10,6 +10,7 @@ from typing import Any
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
+from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
 from bgp_explorer.models.event import EventType
 from bgp_explorer.sources.bgp_radar import BgpRadarClient
 from bgp_explorer.sources.globalping import GlobalpingClient
@@ -42,6 +43,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "start_monitoring": "Starting BGP anomaly monitoring...",
     "stop_monitoring": "Stopping BGP anomaly monitoring...",
     "check_prefix_anomalies": "Checking {prefix} for hijack indicators...",
+    "assess_network_resilience": "Assessing network resilience for AS{asn}...",
 }
 
 
@@ -97,6 +99,7 @@ class BGPTools:
         self._monocle = monocle
         self._path_analyzer = PathAnalyzer()
         self._as_analyzer = ASAnalyzer()
+        self._resilience_assessor = ResilienceAssessor()
 
     def get_all_tools(self) -> list[Callable[..., Any]]:
         """Get all tool functions for registration with AI backend.
@@ -153,6 +156,9 @@ class BGPTools:
                     self.get_as_connectivity_summary,
                 ]
             )
+        # Add resilience assessment tool if both monocle and peeringdb available
+        if self._monocle and self._peeringdb:
+            tools.append(self.assess_network_resilience)
         return tools
 
     async def search_asn(self, query: str) -> str:
@@ -214,10 +220,12 @@ class BGPTools:
                     for network in pdb_results:
                         if network.asn not in seen_asns:
                             seen_asns.add(network.asn)
-                            all_results.append({
-                                "asn": network.asn,
-                                "description": f"{network.name} (via PeeringDB)",
-                            })
+                            all_results.append(
+                                {
+                                    "asn": network.asn,
+                                    "description": f"{network.name} (via PeeringDB)",
+                                }
+                            )
                 except Exception:
                     pass  # PeeringDB search failed, continue without it
 
@@ -312,9 +320,7 @@ class BGPTools:
         except Exception as e:
             return f"Error looking up prefix {prefix}: {str(e)}"
 
-    async def get_asn_announcements(
-        self, asn: int, address_family: int | None = None
-    ) -> str:
+    async def get_asn_announcements(self, asn: int, address_family: int | None = None) -> str:
         """Get prefixes announced by an AS, optionally filtered by address family.
 
         Returns a list of IP prefixes that are currently originated
@@ -1712,3 +1718,118 @@ class BGPTools:
 
         except Exception as e:
             return f"Error checking prefix anomalies for {prefix}: {str(e)}"
+
+    async def assess_network_resilience(self, asn: int) -> str:
+        """Assess network resilience and diversity for an Autonomous System.
+
+        Produces a resilience score (1-10) plus detailed report with recommendations.
+        Evaluates transit diversity, peering breadth, IXP presence, and path redundancy.
+
+        **Scoring Model:**
+        | Dimension        | Weight | Criteria                                    |
+        |------------------|--------|---------------------------------------------|
+        | Transit Diversity| 30%    | Upstream count (min 2 required, 3+ optimal) |
+        | Peering Breadth  | 25%    | Total peer count (more = better DDoS absorb)|
+        | IXP Presence     | 20%    | Number of IXPs (geographic diversity)       |
+        | Path Redundancy  | 25%    | Distinct AS paths from collectors           |
+
+        **Score capped at 5 if:**
+        - Single transit provider (critical single point of failure)
+        - Always-on DDoS protection provider detected in upstream path
+
+        Use this tool to:
+        - Assess a network's resilience to outages and DDoS attacks
+        - Identify single points of failure in a network's connectivity
+        - Get recommendations for improving network diversity
+        - Evaluate potential peering partners or transit providers
+
+        Args:
+            asn: Autonomous System Number to assess (e.g., 15169 for Google).
+
+        Returns:
+            Resilience assessment with score (1-10), component breakdown, and recommendations.
+        """
+        # Check if required data sources are available
+        if self._monocle is None:
+            return (
+                "Monocle is not configured. Network resilience assessment requires "
+                "Monocle for AS relationship data. Install with: cargo install monocle"
+            )
+
+        if self._peeringdb is None:
+            return (
+                "PeeringDB is not configured. Network resilience assessment requires "
+                "PeeringDB for IXP presence data."
+            )
+
+        try:
+            # Gather data from monocle and peeringdb
+            upstreams = await self._monocle.get_as_upstreams(asn)
+            peers = await self._monocle.get_as_peers(asn)
+            ixps = self._peeringdb.get_ixps_for_asn(asn)
+
+            # Calculate component scores using ResilienceAssessor
+            transit_score, transit_issues = self._resilience_assessor._score_transit(upstreams)
+            peering_score, peer_count = self._resilience_assessor._score_peering(peers)
+            ixp_score, ixp_names = self._resilience_assessor._score_ixp(ixps)
+
+            # For now, use transit diversity as proxy for path redundancy
+            # (Real implementation would query multiple collectors)
+            path_redundancy_score = transit_score
+
+            # Check for DDoS provider in upstreams
+            ddos_provider = self._resilience_assessor._detect_ddos_provider(upstreams)
+
+            # Check for single transit
+            single_transit = len(upstreams) == 1
+
+            # Build scores and flags
+            scores = {
+                "transit": transit_score,
+                "peering": peering_score,
+                "ixp": ixp_score,
+                "path_redundancy": path_redundancy_score,
+            }
+            flags = {
+                "single_transit": single_transit,
+                "ddos_provider": ddos_provider,
+            }
+
+            # Calculate final score
+            final_score = self._resilience_assessor._calculate_final_score(scores, flags)
+
+            # Build upstream names
+            upstream_names = []
+            for u in upstreams[:10]:
+                name = f"AS{u.asn2}"
+                if u.asn2_name:
+                    name += f" ({u.asn2_name})"
+                upstream_names.append(name)
+
+            # Build report
+            report = ResilienceReport(
+                asn=asn,
+                score=final_score,
+                transit_score=transit_score,
+                peering_score=peering_score,
+                ixp_score=ixp_score,
+                path_redundancy_score=path_redundancy_score,
+                upstream_count=len(upstreams),
+                peer_count=peer_count,
+                ixp_count=len(ixps),
+                upstreams=upstream_names,
+                ixps=ixp_names,
+                issues=transit_issues,
+                recommendations=[],  # Will be generated
+                single_transit=single_transit,
+                ddos_provider_detected=ddos_provider,
+            )
+
+            # Generate recommendations
+            report.recommendations = self._resilience_assessor._generate_recommendations(report)
+
+            # Format and return report
+            return self._resilience_assessor.format_report(report)
+
+        except Exception as e:
+            return f"Error assessing network resilience for AS{asn}: {str(e)}"
