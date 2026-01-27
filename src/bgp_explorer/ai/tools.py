@@ -23,7 +23,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_asn": "Searching for ASNs matching '{query}'...",
     "lookup_prefix": "Looking up prefix {prefix}...",
     "get_asn_announcements": "Getting announcements for AS{asn}...",
-    "get_routing_history": "Fetching routing history for {resource}...",
+    "get_routing_history": "Fetching origin history for {resource}...",
+    "get_bgp_path_history": "Fetching path history for {prefix}...",
     "get_anomalies": "Checking for BGP anomalies...",
     "get_rpki_status": "Validating RPKI for {prefix}...",
     "analyze_as_path": "Analyzing AS paths for {prefix}...",
@@ -112,6 +113,7 @@ class BGPTools:
             self.lookup_prefix,
             self.get_asn_announcements,
             self.get_routing_history,
+            self.get_bgp_path_history,
             self.get_anomalies,
             self.get_rpki_status,
             self.analyze_as_path,
@@ -400,10 +402,16 @@ class BGPTools:
         start_date: str,
         end_date: str,
     ) -> str:
-        """Get historical routing information for a prefix or ASN.
+        """Get historical ORIGIN ASN changes for a prefix or ASN.
 
-        Shows how routing for the resource has changed over time,
-        including origin ASN changes and visibility changes.
+        Shows which ASes originated the prefix over time. This tool tracks
+        ORIGIN changes only - it does NOT show AS path changes or upstream
+        provider changes.
+
+        For detailed path-level history (upstream changes, path convergence),
+        use get_bgp_path_history() instead.
+
+        Data source: RIPE Stat routing-history API.
 
         Args:
             resource: IP prefix (e.g., "8.8.8.0/24") or ASN (e.g., "AS15169").
@@ -411,7 +419,7 @@ class BGPTools:
             end_date: End date in ISO format (YYYY-MM-DD).
 
         Returns:
-            Historical routing timeline for the resource.
+            Historical origin ASN timeline for the resource.
         """
         try:
             # Parse dates
@@ -447,6 +455,122 @@ class BGPTools:
 
         except Exception as e:
             return f"Error getting routing history: {str(e)}"
+
+    async def get_bgp_path_history(
+        self,
+        prefix: str,
+        start_date: str,
+        end_date: str,
+    ) -> str:
+        """Get detailed AS path changes for a prefix over time.
+
+        Shows how the AS paths (upstream providers, transit networks) changed
+        over time. Use this to investigate:
+        - Upstream provider changes during an outage
+        - Path convergence after a routing change
+        - Historical path diversity analysis
+
+        For simple origin ASN changes only, use get_routing_history() instead.
+
+        Data source: RIPE Stat BGPlay API.
+
+        Args:
+            prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24").
+            start_date: Start date in ISO format (YYYY-MM-DD).
+            end_date: End date in ISO format (YYYY-MM-DD).
+
+        Returns:
+            Timeline of AS path changes with timestamps.
+        """
+        try:
+            start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
+            end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
+
+            data = await self._ripe_stat.get_bgp_events(prefix, start, end)
+
+            summary = [
+                f"**AS Path History: {prefix}**",
+                f"**Period:** {start_date} to {end_date}",
+                "",
+            ]
+
+            # Extract initial state
+            initial_state = data.get("initial_state", [])
+            if initial_state:
+                summary.append(f"**Initial paths:** {len(initial_state)}")
+                # Show unique paths at start
+                unique_initial_paths: set[tuple[int, ...]] = set()
+                for entry in initial_state:
+                    path = tuple(entry.get("path", []))
+                    if path:
+                        unique_initial_paths.add(path)
+                summary.append(f"**Unique initial paths:** {len(unique_initial_paths)}")
+                for i, path in enumerate(list(unique_initial_paths)[:5]):
+                    path_str = " → ".join(f"AS{asn}" for asn in path)
+                    summary.append(f"  {i + 1}. {path_str}")
+                if len(unique_initial_paths) > 5:
+                    summary.append(f"  ... and {len(unique_initial_paths) - 5} more")
+                summary.append("")
+
+            # Extract events (path changes)
+            events = data.get("events", [])
+            if not events:
+                summary.append("**No path changes detected during this period.**")
+                summary.append("")
+                summary.append(
+                    "This means the AS paths remained stable. For origin-only changes, "
+                    "use get_routing_history()."
+                )
+            else:
+                # Group events by type
+                announcements = [e for e in events if e.get("type") == "A"]
+                withdrawals = [e for e in events if e.get("type") == "W"]
+
+                summary.append("**Path Events:**")
+                summary.append(f"  - Announcements: {len(announcements)}")
+                summary.append(f"  - Withdrawals: {len(withdrawals)}")
+                summary.append("")
+
+                # Show recent events (most interesting for analysis)
+                summary.append("**Recent path changes (last 10):**")
+                for event in events[-10:]:
+                    event_type = event.get("type", "?")
+                    timestamp = event.get("timestamp", "")
+                    path = event.get("path", [])
+                    source_id = event.get("source_id", "unknown")
+
+                    type_label = "ANNOUNCE" if event_type == "A" else "WITHDRAW"
+                    if path:
+                        path_str = " → ".join(f"AS{asn}" for asn in path)
+                        summary.append(f"  [{timestamp}] {type_label}: {path_str}")
+                    else:
+                        summary.append(f"  [{timestamp}] {type_label} (from {source_id})")
+
+                # Identify path changes (unique paths that appeared)
+                unique_paths_in_events: set[tuple[int, ...]] = set()
+                for event in events:
+                    if event.get("type") == "A":
+                        path = tuple(event.get("path", []))
+                        if path:
+                            unique_paths_in_events.add(path)
+
+                if unique_paths_in_events:
+                    summary.append("")
+                    summary.append(f"**Unique paths observed in changes:** {len(unique_paths_in_events)}")
+                    # Extract upstream ASes (second-to-last in paths, when present)
+                    upstream_asns: set[int] = set()
+                    for path in unique_paths_in_events:
+                        if len(path) >= 2:
+                            upstream_asns.add(path[-2])
+                    if upstream_asns:
+                        summary.append(
+                            f"**Upstream ASes observed:** {', '.join(f'AS{asn}' for asn in sorted(upstream_asns))}"
+                        )
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting BGP path history: {str(e)}"
 
     async def get_anomalies(
         self,
