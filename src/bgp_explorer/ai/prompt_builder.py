@@ -42,6 +42,9 @@ ALWAYS check security posture whenever routing data is involved:
 5. If RPKI is invalid → HIGH PRIORITY: potential hijack, recommend contacting NOC
 6. If RPKI is not-found → Note: owner hasn't deployed RPKI yet (common, not necessarily bad)
 7. Multiple origins (MOAS) can be legitimate (anycast, CDNs) - investigate before alarming
+8. For in-depth ASN investigations: Run assess_network_resilience() to evaluate transit diversity, peering breadth, and IXP presence
+9. Flag single-transit providers as a security concern (single point of failure)
+10. Note when a network has IXP presence but zero peering (missed redundancy opportunity)
 
 **IPv4/IPv6 AWARENESS:**
 Many networks handle IPv4 and IPv6 differently:
