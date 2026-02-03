@@ -67,6 +67,14 @@ claude
 
 **Important:** Replace `/path/to/bgp-explorer` with the actual path where you cloned the repository.
 
+### Fix Broken MCP Installation
+
+If you already installed bgp-explorer but MCP isn't working ("Failed to reconnect"), run this one-liner to auto-detect the path and fix it:
+
+```bash
+BGP_DIR=$(find ~ -type f -name "mcp_server.py" -path "*bgp-explorer*" 2>/dev/null | head -1 | xargs dirname | xargs dirname | xargs dirname) && claude mcp remove bgp-explorer 2>/dev/null; claude mcp add bgp-explorer -- uv run --directory "$BGP_DIR" bgp-explorer mcp
+```
+
 **How it works:** The MCP server exposes 23 BGP investigation tools. All AI processing uses your Claude Code subscription - no separate API costs.
 
 See [Claude Code Integration](https://github.com/hervehildenbrand/bgp-explorer/wiki/Claude-Code-Integration) in the wiki for details.
