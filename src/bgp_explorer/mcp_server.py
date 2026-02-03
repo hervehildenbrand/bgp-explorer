@@ -5,14 +5,20 @@ BGP Explorer's investigation tools. Users with Claude Code subscriptions
 can use these tools without needing an API key.
 
 Usage:
-    # Start the MCP server
-    bgp-explorer mcp
+    # Add to Claude Code (use YOUR actual path)
+    claude mcp add bgp-explorer -- uv run --directory /path/to/bgp-explorer bgp-explorer mcp
 
-    # Add to Claude Code
-    claude mcp add bgp-explorer -- bgp-explorer mcp
+    # Example with home directory:
+    claude mcp add bgp-explorer -- uv run --directory ~/Code/bgp-explorer bgp-explorer mcp
+
+    # Verify it works:
+    claude mcp list
 
     # Then use Claude Code normally
     claude
+
+IMPORTANT: The 'bgp-explorer' command is NOT globally installed.
+You must use 'uv run --directory' to specify the installation path.
 """
 
 import logging

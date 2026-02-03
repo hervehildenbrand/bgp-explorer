@@ -46,15 +46,26 @@ uv run bgp-explorer chat          # All 24 tools ready!
 If you have a **Claude Code subscription** (Pro/Max), you can use BGP Explorer tools directly in Claude Code without needing an Anthropic API key:
 
 ```bash
-# One-time setup: add bgp-explorer as an MCP server
-claude mcp add bgp-explorer -- bgp-explorer mcp
+# 1. Clone and install
+git clone https://github.com/hervehildenbrand/bgp-explorer.git
+cd bgp-explorer
+uv sync
+uv run bgp-explorer install-deps
 
-# Then use Claude Code normally - BGP tools are available!
+# 2. Add as MCP server (use the FULL PATH to your clone)
+claude mcp add bgp-explorer -- uv run --directory /path/to/bgp-explorer bgp-explorer mcp
+
+# Example with home directory:
+claude mcp add bgp-explorer -- uv run --directory ~/Code/bgp-explorer bgp-explorer mcp
+
+# 3. Use Claude Code normally - BGP tools are available!
 claude
 > Search for Cloudflare's ASNs and show their peers
 > Check if 8.8.8.0/24 is being hijacked
 > Ping 1.1.1.1 from Asia
 ```
+
+**Important:** Replace `/path/to/bgp-explorer` with the actual path where you cloned the repository.
 
 **How it works:** The MCP server exposes 23 BGP investigation tools. All AI processing uses your Claude Code subscription - no separate API costs.
 
