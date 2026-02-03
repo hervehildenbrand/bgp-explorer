@@ -46,17 +46,15 @@ uv run bgp-explorer chat          # All 24 tools ready!
 If you have a **Claude Code subscription** (Pro/Max), you can use BGP Explorer tools directly in Claude Code without needing an Anthropic API key:
 
 ```bash
-# 1. Clone and install
+# 1. Clone and install globally
 git clone https://github.com/hervehildenbrand/bgp-explorer.git
 cd bgp-explorer
 uv sync
 uv run bgp-explorer install-deps
+uv tool install .  # Installs bgp-explorer globally
 
-# 2. Add as MCP server (use the FULL PATH to your clone)
-claude mcp add bgp-explorer -- uv run --directory /path/to/bgp-explorer bgp-explorer mcp
-
-# Example with home directory:
-claude mcp add bgp-explorer -- uv run --directory ~/Code/bgp-explorer bgp-explorer mcp
+# 2. Add as MCP server
+claude mcp add bgp-explorer -- bgp-explorer mcp
 
 # 3. Use Claude Code normally - BGP tools are available!
 claude
@@ -65,14 +63,15 @@ claude
 > Ping 1.1.1.1 from Asia
 ```
 
-**Important:** Replace `/path/to/bgp-explorer` with the actual path where you cloned the repository.
-
 ### Fix Broken MCP Installation
 
-If you already installed bgp-explorer but MCP isn't working ("Failed to reconnect"), run this one-liner to auto-detect the path and fix it:
+If MCP isn't working ("Failed to reconnect"), reinstall globally:
 
 ```bash
-BGP_DIR=$(find ~ -type f -name "mcp_server.py" -path "*bgp-explorer*" 2>/dev/null | head -1 | xargs dirname | xargs dirname | xargs dirname) && claude mcp remove bgp-explorer 2>/dev/null; claude mcp add bgp-explorer -- uv run --directory "$BGP_DIR" bgp-explorer mcp
+cd /path/to/bgp-explorer  # Go to your clone
+uv tool install .
+claude mcp remove bgp-explorer 2>/dev/null
+claude mcp add bgp-explorer -- bgp-explorer mcp
 ```
 
 **How it works:** The MCP server exposes 23 BGP investigation tools. All AI processing uses your Claude Code subscription - no separate API costs.

@@ -406,21 +406,15 @@ def mcp():
     This allows you to use BGP Explorer tools with Claude Code (Pro/Max
     subscription) without needing a separate API key.
 
-    Setup (use YOUR actual path to bgp-explorer):
+    Setup:
 
-        claude mcp add bgp-explorer -- uv run --directory /path/to/bgp-explorer bgp-explorer mcp
-
-    Example:
-
-        claude mcp add bgp-explorer -- uv run --directory ~/Code/bgp-explorer bgp-explorer mcp
-
-    Then use Claude Code normally - BGP tools are now available!
-
-    IMPORTANT: The command must include 'uv run --directory' because bgp-explorer
-    is not globally installed. Replace /path/to/bgp-explorer with where you cloned
-    the repository.
+        cd /path/to/bgp-explorer
+        uv tool install .                              # Install globally
+        claude mcp add bgp-explorer -- bgp-explorer mcp
 
     To verify: claude mcp list
+
+    Then use Claude Code normally - BGP tools are available!
     """
     from bgp_explorer.mcp_server import main as run_mcp
 
