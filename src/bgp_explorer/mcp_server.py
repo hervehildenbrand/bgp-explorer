@@ -771,9 +771,15 @@ async def get_asn_details(
         ]
 
         if asn_summary["upstream_asns"]:
-            summary.append(f"**Upstream Providers:** {len(asn_summary['upstream_asns'])}")
+            summary.append(
+                f"**Observed Upstream ASNs (from sampled routes):** {len(asn_summary['upstream_asns'])}"
+            )
             upstream_list = ", ".join(f"AS{u}" for u in sorted(asn_summary["upstream_asns"])[:10])
             summary.append(f"  {upstream_list}")
+            summary.append(
+                "  Note: These are ASNs seen before this AS in paths, not necessarily transit providers."
+                " Use get_as_upstreams for authoritative relationship data."
+            )
             summary.append("")
 
         if asn_summary["downstream_asns"]:
