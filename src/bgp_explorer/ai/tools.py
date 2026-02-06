@@ -435,6 +435,9 @@ class BGPTools:
             start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
             end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
 
+            if start > end:
+                return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
+
             history = await self._ripe_stat.get_routing_history(resource, start, end)
 
             summary = [
@@ -494,6 +497,9 @@ class BGPTools:
         try:
             start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
             end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
+
+            if start > end:
+                return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
 
             data = await self._ripe_stat.get_bgp_events(prefix, start, end)
 

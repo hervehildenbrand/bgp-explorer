@@ -417,10 +417,13 @@ async def get_routing_history(
     Data source: RIPE Stat routing-history API.
     """
     try:
-        client = await get_ripe_stat()
         start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
         end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
 
+        if start > end:
+            return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
+
+        client = await get_ripe_stat()
         history = await client.get_routing_history(resource, start, end)
 
         summary = [
@@ -473,10 +476,13 @@ async def get_bgp_path_history(
     Data source: RIPE Stat BGPlay API.
     """
     try:
-        client = await get_ripe_stat()
         start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
         end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
 
+        if start > end:
+            return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
+
+        client = await get_ripe_stat()
         data = await client.get_bgp_events(prefix, start, end)
 
         summary = [

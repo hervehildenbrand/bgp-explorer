@@ -90,3 +90,54 @@ class TestLookupPrefix:
         tools = BGPTools(ripe_stat=mock_ripe, bgp_radar=AsyncMock())
         result = await tools.lookup_prefix("2001:db8::/32")
         assert "CIDR" not in result
+
+
+class TestDateRangeValidation:
+    """Tests for date range validation in routing history tools."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_routing_history_reversed_dates(self):
+        """Test that reversed dates are rejected in mcp get_routing_history."""
+        result = await mcp_server.get_routing_history(
+            "8.8.8.0/24", "2026-02-06", "2026-02-01"
+        )
+        assert "after" in result.lower() or "invalid date range" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_mcp_bgp_path_history_reversed_dates(self):
+        """Test that reversed dates are rejected in mcp get_bgp_path_history."""
+        result = await mcp_server.get_bgp_path_history(
+            "8.8.8.0/24", "2026-02-06", "2026-02-01"
+        )
+        assert "after" in result.lower() or "invalid date range" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_tools_routing_history_reversed_dates(self):
+        """Test that reversed dates are rejected in ai/tools get_routing_history."""
+        tools = BGPTools(ripe_stat=AsyncMock(), bgp_radar=AsyncMock())
+        result = await tools.get_routing_history(
+            "8.8.8.0/24", "2026-02-06", "2026-02-01"
+        )
+        assert "after" in result.lower() or "invalid date range" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_tools_bgp_path_history_reversed_dates(self):
+        """Test that reversed dates are rejected in ai/tools get_bgp_path_history."""
+        tools = BGPTools(ripe_stat=AsyncMock(), bgp_radar=AsyncMock())
+        result = await tools.get_bgp_path_history(
+            "8.8.8.0/24", "2026-02-06", "2026-02-01"
+        )
+        assert "after" in result.lower() or "invalid date range" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_mcp_routing_history_valid_dates_accepted(self):
+        """Test that valid date order is accepted."""
+        mock_client = AsyncMock()
+        mock_client.get_routing_history = AsyncMock(return_value={"by_origin": []})
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.get_routing_history(
+                "8.8.8.0/24", "2026-02-01", "2026-02-06"
+            )
+
+        assert "invalid date range" not in result.lower()
