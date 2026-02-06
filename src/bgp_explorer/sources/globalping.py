@@ -235,6 +235,15 @@ class GlobalpingClient(DataSource):
                 if "limit" not in loc:
                     loc = {**loc, "limit": limit}
             result.append(loc)
+
+        # Cap total probes to avoid Globalping API limits
+        MAX_TOTAL_PROBES = 50
+        total_requested = sum(loc.get("limit", limit) for loc in result)
+        if total_requested > MAX_TOTAL_PROBES:
+            per_loc_limit = max(1, MAX_TOTAL_PROBES // len(result))
+            for loc in result:
+                loc["limit"] = per_loc_limit
+
         return result
 
     def _default_locations(self, limit: int = 3) -> list[dict[str, Any]]:

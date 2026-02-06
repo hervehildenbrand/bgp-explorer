@@ -433,6 +433,30 @@ class TestGlobalpingClient:
                 assert "Invalid target specified" in str(exc_info.value)
 
     @pytest.mark.asyncio
+    async def test_parse_locations_caps_total_probes(self, client):
+        """Test that _parse_locations caps total probes to avoid Globalping API limits."""
+        # 10 locations with limit=10 = 100 probes, should be capped to ~50
+        locations = ["US", "DE", "JP", "BR", "AU", "SG", "ZA", "IN", "FR", "GB"]
+        result = client._parse_locations(locations, limit=10)
+
+        total_probes = sum(loc.get("limit", 0) for loc in result)
+        assert total_probes <= 50
+        assert len(result) == 10  # All locations preserved
+        # Each location should have at least 1 probe
+        for loc in result:
+            assert loc["limit"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_parse_locations_no_cap_when_under_limit(self, client):
+        """Test that _parse_locations does NOT cap when total probes are reasonable."""
+        # 3 locations with limit=3 = 9 probes, should not be capped
+        locations = ["US", "DE", "JP"]
+        result = client._parse_locations(locations, limit=3)
+
+        total_probes = sum(loc.get("limit", 0) for loc in result)
+        assert total_probes == 9  # No capping needed
+
+    @pytest.mark.asyncio
     async def test_400_bad_request_error(self, client):
         """Test that 400 errors are handled with the error message."""
         error_response = {
