@@ -572,7 +572,7 @@ async def get_rpki_status(
         client = await get_ripe_stat()
         status = await client.get_rpki_validation(prefix, origin_asn)
 
-        status_emoji = {"valid": "OK", "invalid": "INVALID", "not-found": "NOT FOUND"}.get(
+        status_label = {"valid": "VALID", "invalid": "INVALID", "not-found": "NOT FOUND"}.get(
             status, "UNKNOWN"
         )
 
@@ -581,7 +581,7 @@ async def get_rpki_status(
             "",
             f"**Prefix:** {prefix}",
             f"**Origin:** AS{origin_asn}",
-            f"**Status:** {status_emoji}",
+            f"**Status:** {status_label}",
             "",
         ]
 
