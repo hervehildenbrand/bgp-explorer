@@ -267,6 +267,12 @@ async def lookup_prefix(
     Data source: RIPE Stat BGP State API.
     """
     try:
+        if "/" not in prefix:
+            return (
+                f"Invalid prefix format: '{prefix}'. "
+                f"Please use CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')."
+            )
+
         client = await get_ripe_stat()
         routes = await client.get_bgp_state(prefix)
 

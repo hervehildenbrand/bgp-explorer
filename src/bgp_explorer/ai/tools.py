@@ -291,6 +291,12 @@ class BGPTools:
             Human-readable summary of routing information for the prefix.
         """
         try:
+            if "/" not in prefix:
+                return (
+                    f"Invalid prefix format: '{prefix}'. "
+                    f"Please use CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')."
+                )
+
             routes = await self._ripe_stat.get_bgp_state(prefix)
 
             # Detect address family

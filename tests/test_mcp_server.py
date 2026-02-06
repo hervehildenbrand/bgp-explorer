@@ -52,3 +52,41 @@ class TestSearchAsn:
         tools = BGPTools(ripe_stat=AsyncMock(), bgp_radar=AsyncMock())
         result = await tools.search_asn("   ")
         assert "non-empty" in result.lower() or "provide" in result.lower()
+
+
+class TestLookupPrefix:
+    """Tests for lookup_prefix input validation."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_rejects_prefix_without_cidr(self):
+        """Test that prefix without CIDR slash is rejected."""
+        result = await mcp_server.lookup_prefix("8.8.8.0")
+        assert "CIDR" in result or "cidr" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_mcp_accepts_valid_cidr(self):
+        """Test that valid CIDR prefix is accepted (doesn't hit the guard)."""
+        mock_client = AsyncMock()
+        mock_client.get_bgp_state = AsyncMock(return_value=[])
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.lookup_prefix("8.8.8.0/24")
+
+        # Should not contain CIDR error
+        assert "CIDR" not in result
+
+    @pytest.mark.asyncio
+    async def test_tools_rejects_prefix_without_cidr(self):
+        """Test that prefix without CIDR slash is rejected in ai/tools.py."""
+        tools = BGPTools(ripe_stat=AsyncMock(), bgp_radar=AsyncMock())
+        result = await tools.lookup_prefix("8.8.8.0")
+        assert "CIDR" in result or "cidr" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_tools_accepts_ipv6_cidr(self):
+        """Test that valid IPv6 CIDR prefix is accepted."""
+        mock_ripe = AsyncMock()
+        mock_ripe.get_bgp_state = AsyncMock(return_value=[])
+        tools = BGPTools(ripe_stat=mock_ripe, bgp_radar=AsyncMock())
+        result = await tools.lookup_prefix("2001:db8::/32")
+        assert "CIDR" not in result
