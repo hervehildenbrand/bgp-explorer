@@ -144,6 +144,54 @@ class TestRipeStatClient:
             assert status == "invalid"
 
     @pytest.mark.asyncio
+    async def test_get_rpki_validation_invalid_asn(self, client):
+        """Test RPKI validation normalizes 'invalid_asn' to 'invalid'."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "resource": "15169",
+                "prefix": "1.1.1.0/24",
+                "validating_roas": [],
+                "status": "invalid_asn",
+            },
+        }
+
+        with aioresponses() as m:
+            m.get(
+                "https://stat.ripe.net/data/rpki-validation/data.json?resource=15169&prefix=1.1.1.0/24",
+                payload=mock_response,
+            )
+
+            async with client:
+                status = await client.get_rpki_validation("1.1.1.0/24", 15169)
+
+            assert status == "invalid"
+
+    @pytest.mark.asyncio
+    async def test_get_rpki_validation_invalid_length(self, client):
+        """Test RPKI validation normalizes 'invalid_length' to 'invalid'."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "resource": "13335",
+                "prefix": "1.1.1.0/25",
+                "validating_roas": [],
+                "status": "invalid_length",
+            },
+        }
+
+        with aioresponses() as m:
+            m.get(
+                "https://stat.ripe.net/data/rpki-validation/data.json?resource=13335&prefix=1.1.1.0/25",
+                payload=mock_response,
+            )
+
+            async with client:
+                status = await client.get_rpki_validation("1.1.1.0/25", 13335)
+
+            assert status == "invalid"
+
+    @pytest.mark.asyncio
     async def test_get_routing_history(self, client):
         """Test getting routing history for a resource."""
         mock_response = {

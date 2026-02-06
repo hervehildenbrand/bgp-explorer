@@ -153,7 +153,11 @@ class RipeStatClient(DataSource):
             "rpki-validation",
             {"resource": origin_asn, "prefix": prefix},
         )
-        return data.get("status", "not-found")
+        status = data.get("status", "not-found")
+        # RIPE Stat returns "invalid_asn" or "invalid_length" — normalize to "invalid"
+        if status.startswith("invalid"):
+            return "invalid"
+        return status
 
     async def get_routing_history(
         self,
