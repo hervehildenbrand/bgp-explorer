@@ -156,6 +156,9 @@ async def search_asn(
     Data source: RIPE Stat searchcomplete API, with PeeringDB fallback.
     """
     try:
+        if not query or not query.strip():
+            return "Please provide a non-empty search query (e.g., 'Google', 'Cloudflare')."
+
         client = await get_ripe_stat()
 
         # Generate search variations for thorough matching

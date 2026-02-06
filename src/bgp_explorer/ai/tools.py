@@ -179,6 +179,9 @@ class BGPTools:
             List of matching ASNs. If multiple matches, ask user to confirm.
         """
         try:
+            if not query or not query.strip():
+                return "Please provide a non-empty search query (e.g., 'Google', 'Cloudflare')."
+
             # Generate search variations for thorough matching
             variations = [query]
 
