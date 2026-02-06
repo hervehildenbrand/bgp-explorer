@@ -272,7 +272,15 @@ async def lookup_prefix(
         family_str = "IPv6" if is_ipv6 else "IPv4"
 
         if not routes:
-            return f"No routes found for {family_str} prefix {prefix}. The prefix may not be announced or visible from RIPE RIS collectors."
+            msg = f"No routes found for {family_str} prefix {prefix}."
+            msg += " The prefix may not be announced as an aggregate, or may not be visible from RIPE RIS collectors."
+            if is_ipv6:
+                msg += (
+                    " For IPv6, many networks announce more-specific prefixes"
+                    " (e.g., /48s) instead of the aggregate block."
+                )
+            msg += " Try using get_asn_announcements to see what prefixes an ASN actually announces."
+            return msg
 
         origin_asns = set(r.origin_asn for r in routes)
         collectors = set(r.collector for r in routes)
