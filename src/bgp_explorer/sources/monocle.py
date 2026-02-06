@@ -141,7 +141,12 @@ class MonocleClient(DataSource):
             raise RuntimeError(f"Monocle command failed: {error_msg}")
 
         try:
-            return json.loads(stdout.decode())
+            result = json.loads(stdout.decode())
+            # Monocle returns bare arrays for some commands (e.g., as2rel with two ASNs).
+            # Normalize to dict so callers can consistently use .get("results", []).
+            if isinstance(result, list):
+                return {"results": result}
+            return result
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse Monocle JSON output: {e}")
 

@@ -486,6 +486,71 @@ class TestMonocleClient:
         assert "--no-refresh" not in captured_args
 
     @pytest.mark.asyncio
+    async def test_run_command_bare_array_response(self, client):
+        """Test that _run_command normalizes bare JSON array to dict with results key."""
+        # Monocle returns bare [] when no results found (e.g., as2rel with two ASNs)
+        bare_array = [
+            {
+                "asn1": 13335,
+                "asn2": 15169,
+                "connected": "50.0%",
+                "peer": "50.0%",
+                "as1_upstream": "0.0%",
+                "as2_upstream": "0.0%",
+            }
+        ]
+
+        async def mock_run(*args, **kwargs):
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.communicate = AsyncMock(
+                return_value=(json.dumps(bare_array).encode(), b"")
+            )
+            return mock_process
+
+        with patch("asyncio.create_subprocess_exec", mock_run):
+            result = await client._run_command(["as2rel", "13335", "15169"])
+
+        # Should be wrapped in {"results": [...]}
+        assert isinstance(result, dict)
+        assert "results" in result
+        assert len(result["results"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_run_command_bare_empty_array_response(self, client):
+        """Test that _run_command normalizes bare empty JSON array to dict."""
+        async def mock_run(*args, **kwargs):
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.communicate = AsyncMock(
+                return_value=(json.dumps([]).encode(), b"")
+            )
+            return mock_process
+
+        with patch("asyncio.create_subprocess_exec", mock_run):
+            result = await client._run_command(["as2rel", "13335", "15169"])
+
+        assert isinstance(result, dict)
+        assert "results" in result
+        assert len(result["results"]) == 0
+
+    @pytest.mark.asyncio
+    async def test_check_relationship_bare_empty_array(self, client):
+        """Test check_relationship handles monocle returning bare empty array."""
+        async def mock_run(*args, **kwargs):
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.communicate = AsyncMock(
+                return_value=(json.dumps([]).encode(), b"")
+            )
+            return mock_process
+
+        with patch("asyncio.create_subprocess_exec", mock_run):
+            rel = await client.check_relationship(13335, 15169)
+
+        assert rel is None
+
+    @pytest.mark.asyncio
     async def test_get_connectivity_no_queries(self, client):
         """Test get_connectivity raises when no queries returned."""
         mock_output = {"queries": []}
