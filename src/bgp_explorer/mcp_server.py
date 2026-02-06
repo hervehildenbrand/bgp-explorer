@@ -1685,8 +1685,12 @@ async def assess_network_resilience(
         ixps = peeringdb.get_ixps_for_asn(asn)
 
         # Calculate component scores
-        transit_score, transit_issues = assessor._score_transit(upstreams)
+        # Get peer/downstream counts first for Tier 1 detection in transit scoring
         peering_score, peer_count = assessor._score_peering(peers)
+        downstreams = await monocle.get_as_downstreams(asn)
+        transit_score, transit_issues = assessor._score_transit(
+            upstreams, peer_count=peer_count, downstream_count=len(downstreams)
+        )
         ixp_score, ixp_names = assessor._score_ixp(ixps)
 
         # Use transit diversity as proxy for path redundancy

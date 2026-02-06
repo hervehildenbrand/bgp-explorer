@@ -186,6 +186,48 @@ class TestResilienceAssessor:
         assert final_score > 8.0
 
 
+    def test_score_transit_tier1_network(self, assessor):
+        """Test that Tier 1 / transit-free networks score 1.0 with 0 upstreams."""
+        upstreams: list[ASRelationship] = []
+        score, issues = assessor._score_transit(upstreams, peer_count=500, downstream_count=1000)
+        assert score == 1.0
+        assert any("transit-free" in issue.lower() or "tier 1" in issue.lower() for issue in issues)
+
+    def test_score_transit_zero_upstreams_not_tier1(self, assessor):
+        """Test that small networks with 0 upstreams still get 0.0 score."""
+        upstreams: list[ASRelationship] = []
+        score, issues = assessor._score_transit(upstreams, peer_count=5, downstream_count=2)
+        assert score == 0.0
+
+    def test_score_transit_backwards_compatible(self, assessor):
+        """Test that _score_transit works without peer_count/downstream_count args."""
+        upstreams: list[ASRelationship] = []
+        score, issues = assessor._score_transit(upstreams)
+        assert score == 0.0  # No upstreams, no context = worst case
+
+    def test_generate_recommendations_skip_path_diversity_tier1(self, assessor):
+        """Test that 'Low path diversity' recommendation is skipped for transit-free networks."""
+        report = ResilienceReport(
+            asn=3356,
+            score=8.0,
+            transit_score=1.0,
+            peering_score=1.0,
+            ixp_score=1.0,
+            path_redundancy_score=0.3,  # Low, would normally trigger recommendation
+            upstream_count=0,
+            peer_count=500,
+            ixp_count=10,
+            upstreams=[],
+            ixps=["AMS-IX", "DE-CIX"],
+            issues=["Transit-free network (Tier 1) - no upstream providers needed"],
+            recommendations=[],
+            single_transit=False,
+            ddos_provider_detected=None,
+        )
+        recs = assessor._generate_recommendations(report)
+        assert not any("path diversity" in r.lower() for r in recs)
+
+
 class TestResilienceReport:
     """Tests for ResilienceReport dataclass."""
 

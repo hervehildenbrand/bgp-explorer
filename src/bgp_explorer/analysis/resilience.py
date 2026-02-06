@@ -84,11 +84,18 @@ class ResilienceAssessor:
     - Always-on DDoS provider detected in upstream path
     """
 
-    def _score_transit(self, upstreams: list[ASRelationship]) -> tuple[float, list[str]]:
+    def _score_transit(
+        self,
+        upstreams: list[ASRelationship],
+        peer_count: int = 0,
+        downstream_count: int = 0,
+    ) -> tuple[float, list[str]]:
         """Score transit diversity.
 
         Args:
             upstreams: List of upstream provider relationships.
+            peer_count: Number of peers (used for Tier 1 detection).
+            downstream_count: Number of downstreams (used for Tier 1 detection).
 
         Returns:
             Tuple of (score 0-1, list of issues).
@@ -97,6 +104,12 @@ class ResilienceAssessor:
         upstream_count = len(upstreams)
 
         if upstream_count == 0:
+            # Tier 1 / transit-free networks have no upstreams by definition
+            if peer_count >= 100 and downstream_count >= 100:
+                issues.append(
+                    "Transit-free network (Tier 1) - no upstream providers needed"
+                )
+                return 1.0, issues
             issues.append(
                 "No transit providers detected - network may be Tier 1 or data incomplete"
             )
@@ -250,7 +263,8 @@ class ResilienceAssessor:
                 "ensure you have direct paths available as backup"
             )
 
-        if report.path_redundancy_score < 0.5:
+        is_transit_free = any("transit-free" in issue.lower() for issue in report.issues)
+        if report.path_redundancy_score < 0.5 and not is_transit_free:
             recommendations.append(
                 "Low path diversity observed - ensure multiple upstream paths are advertised"
             )
