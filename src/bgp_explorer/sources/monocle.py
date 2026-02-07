@@ -274,8 +274,8 @@ class MonocleClient(DataSource):
             raise RuntimeError(f"No data returned for AS{asn}")
 
         query = queries[0]
-        connectivity = query.get("connectivity", {})
-        summary = connectivity.get("summary", {})
+        connectivity = query.get("connectivity") or {}
+        summary = connectivity.get("summary") or {}
 
         if not summary:
             raise RuntimeError(f"No connectivity data for AS{asn}")

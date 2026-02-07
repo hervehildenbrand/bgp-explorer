@@ -568,6 +568,31 @@ class TestMonocleClient:
                 await client.get_connectivity(99999)
 
     @pytest.mark.asyncio
+    async def test_get_connectivity_null_connectivity(self, client):
+        """Test get_connectivity raises when connectivity is null (unknown ASN)."""
+        mock_output = {
+            "queries": [
+                {
+                    "query": "99999999",
+                    "query_type": "asn",
+                    "connectivity": None,
+                },
+            ],
+        }
+
+        async def mock_run(*args, **kwargs):
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.communicate = AsyncMock(
+                return_value=(json.dumps(mock_output).encode(), b"")
+            )
+            return mock_process
+
+        with patch("asyncio.create_subprocess_exec", mock_run):
+            with pytest.raises(RuntimeError, match="No connectivity data"):
+                await client.get_connectivity(99999999)
+
+    @pytest.mark.asyncio
     async def test_get_connectivity_no_summary(self, client):
         """Test get_connectivity raises when no summary in response."""
         mock_output = {

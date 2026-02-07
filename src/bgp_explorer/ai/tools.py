@@ -179,6 +179,9 @@ class BGPTools:
             List of matching ASNs. If multiple matches, ask user to confirm.
         """
         try:
+            if not query or not query.strip():
+                return "Please provide a non-empty search query (e.g., 'Google', 'Cloudflare')."
+
             # Generate search variations for thorough matching
             variations = [query]
 
@@ -288,6 +291,12 @@ class BGPTools:
             Human-readable summary of routing information for the prefix.
         """
         try:
+            if "/" not in prefix:
+                return (
+                    f"Invalid prefix format: '{prefix}'. "
+                    f"Please use CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')."
+                )
+
             routes = await self._ripe_stat.get_bgp_state(prefix)
 
             # Detect address family
@@ -426,6 +435,9 @@ class BGPTools:
             start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
             end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
 
+            if start > end:
+                return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
+
             history = await self._ripe_stat.get_routing_history(resource, start, end)
 
             summary = [
@@ -485,6 +497,9 @@ class BGPTools:
         try:
             start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
             end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
+
+            if start > end:
+                return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
 
             data = await self._ripe_stat.get_bgp_events(prefix, start, end)
 

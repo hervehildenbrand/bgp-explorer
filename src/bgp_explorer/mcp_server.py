@@ -156,6 +156,9 @@ async def search_asn(
     Data source: RIPE Stat searchcomplete API, with PeeringDB fallback.
     """
     try:
+        if not query or not query.strip():
+            return "Please provide a non-empty search query (e.g., 'Google', 'Cloudflare')."
+
         client = await get_ripe_stat()
 
         # Generate search variations for thorough matching
@@ -264,6 +267,12 @@ async def lookup_prefix(
     Data source: RIPE Stat BGP State API.
     """
     try:
+        if "/" not in prefix:
+            return (
+                f"Invalid prefix format: '{prefix}'. "
+                f"Please use CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')."
+            )
+
         client = await get_ripe_stat()
         routes = await client.get_bgp_state(prefix)
 
@@ -408,10 +417,13 @@ async def get_routing_history(
     Data source: RIPE Stat routing-history API.
     """
     try:
-        client = await get_ripe_stat()
         start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
         end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
 
+        if start > end:
+            return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
+
+        client = await get_ripe_stat()
         history = await client.get_routing_history(resource, start, end)
 
         summary = [
@@ -464,10 +476,13 @@ async def get_bgp_path_history(
     Data source: RIPE Stat BGPlay API.
     """
     try:
-        client = await get_ripe_stat()
         start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
         end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
 
+        if start > end:
+            return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date}). Please swap them."
+
+        client = await get_ripe_stat()
         data = await client.get_bgp_events(prefix, start, end)
 
         summary = [
@@ -572,7 +587,7 @@ async def get_rpki_status(
         client = await get_ripe_stat()
         status = await client.get_rpki_validation(prefix, origin_asn)
 
-        status_emoji = {"valid": "OK", "invalid": "INVALID", "not-found": "NOT FOUND"}.get(
+        status_label = {"valid": "VALID", "invalid": "INVALID", "not-found": "NOT FOUND"}.get(
             status, "UNKNOWN"
         )
 
@@ -581,7 +596,7 @@ async def get_rpki_status(
             "",
             f"**Prefix:** {prefix}",
             f"**Origin:** AS{origin_asn}",
-            f"**Status:** {status_emoji}",
+            f"**Status:** {status_label}",
             "",
         ]
 
