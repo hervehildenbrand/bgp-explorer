@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
+from bgp_explorer.analysis.aspa_validation import create_aspa_validator
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
 from bgp_explorer.models.event import EventType
@@ -45,6 +46,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "stop_monitoring": "Stopping BGP anomaly monitoring...",
     "check_prefix_anomalies": "Checking {prefix} for hijack indicators...",
     "assess_network_resilience": "Assessing network resilience for AS{asn}...",
+    "verify_aspa_path": "Verifying ASPA authorization for path {as_path}...",
 }
 
 
@@ -101,6 +103,7 @@ class BGPTools:
         self._path_analyzer = PathAnalyzer()
         self._as_analyzer = ASAnalyzer()
         self._resilience_assessor = ResilienceAssessor()
+        self._aspa_validator = create_aspa_validator(monocle=monocle)
 
     def get_all_tools(self) -> list[Callable[..., Any]]:
         """Get all tool functions for registration with AI backend.
@@ -156,6 +159,7 @@ class BGPTools:
                     self.get_as_downstreams,
                     self.check_as_relationship,
                     self.get_as_connectivity_summary,
+                    self.verify_aspa_path,
                 ]
             )
         # Add resilience assessment tool if both monocle and peeringdb available
@@ -1608,6 +1612,88 @@ class BGPTools:
         except Exception as e:
             return f"Error getting connectivity summary for AS{asn}: {str(e)}"
 
+    async def verify_aspa_path(self, as_path: str) -> str:
+        """Verify ASPA (AS Provider Authorization) for a BGP AS path.
+
+        Checks whether each hop in the path represents an authorized
+        customer-provider relationship, and whether the path follows
+        valley-free routing (no route leaks).
+
+        This complements RPKI ROA validation: ROA checks origin authorization,
+        ASPA checks path authorization (route leak detection).
+
+        Args:
+            as_path: Comma-separated AS path (e.g., "13335,174,15169").
+                     Order: origin AS first, collector-side AS last.
+
+        Returns:
+            ASPA validation result with per-hop details and valley-free check.
+        """
+        if self._aspa_validator is None:
+            return (
+                "ASPA validation requires Monocle for AS relationship data. "
+                "Install with: cargo install monocle"
+            )
+
+        try:
+            # Parse AS path
+            asns = []
+            for part in as_path.split(","):
+                part = part.strip()
+                if part:
+                    asns.append(int(part))
+
+            if not asns:
+                return "Please provide a valid AS path (e.g., '13335,174,15169')."
+
+            result = await self._aspa_validator.validate_path(asns)
+
+            # Format output
+            path_str = " -> ".join(f"AS{asn}" for asn in result.as_path)
+            state_emoji = {
+                "valid": "✅", "invalid": "❌",
+                "unknown": "❓", "unverifiable": "⚪",
+            }.get(result.state.value, "⚠️")
+
+            summary = [
+                f"**ASPA Path Verification: {path_str}**",
+                "",
+                f"**State:** {state_emoji} {result.state.value.upper()}",
+                f"**Valley-free:** {'✅ Yes' if result.valley_free else '❌ No (possible route leak)'}",
+                "",
+            ]
+
+            if result.hop_results:
+                summary.append("**Per-hop analysis:**")
+                for hop in result.hop_results:
+                    auth_str = {
+                        True: "✅ authorized",
+                        False: "❌ not authorized",
+                        None: "❓ unknown",
+                    }[hop.is_authorized_provider]
+                    summary.append(
+                        f"  - AS{hop.asn} -> AS{hop.next_asn}: "
+                        f"{auth_str} ({hop.relationship_type})"
+                    )
+                summary.append("")
+
+            if result.issues:
+                summary.append("**Issues:**")
+                for issue in result.issues:
+                    summary.append(f"  - {issue}")
+            else:
+                summary.append("**No issues detected.** Path authorization looks good.")
+
+            return "\n".join(summary)
+
+        except ValueError:
+            return (
+                "Invalid AS path format. Use comma-separated ASNs "
+                "(e.g., '13335,174,15169')."
+            )
+        except Exception as e:
+            return f"Error verifying ASPA path: {str(e)}"
+
     async def start_monitoring(
         self,
         collectors: list[str] | None = None,
@@ -1786,6 +1872,28 @@ class BGPTools:
             except Exception:
                 indicators["origin_history"] = {"error": "Could not fetch history"}
 
+            # Step 5: ASPA validation on unique AS paths (if available)
+            aspa_indicators = {"checked": 0, "valid": 0, "invalid": 0, "unknown": 0}
+            if self._aspa_validator:
+                try:
+                    seen_paths: set[tuple[int, ...]] = set()
+                    for route in routes:
+                        if route.as_path:
+                            path_tuple = tuple(route.as_path)
+                            if path_tuple not in seen_paths and len(seen_paths) < 5:
+                                seen_paths.add(path_tuple)
+                                aspa_result = await self._aspa_validator.validate_path(
+                                    list(path_tuple)
+                                )
+                                aspa_indicators["checked"] += 1
+                                aspa_indicators[aspa_result.state.value] += 1
+                                if aspa_result.state.value == "invalid":
+                                    risk_factors.append("ASPA Invalid: route leak detected in AS path")
+                except Exception:
+                    pass
+
+            indicators["aspa"] = aspa_indicators
+
             # Calculate risk level
             if any("RPKI Invalid" in rf for rf in risk_factors):
                 risk_level = "high"
@@ -1841,6 +1949,18 @@ class BGPTools:
                         )
                 else:
                     summary.append("**Origin History:** Stable (no changes in last 7 days)")
+                summary.append("")
+
+            # ASPA section
+            aspa = indicators["aspa"]
+            if aspa["checked"] > 0:
+                summary.append(
+                    f"**ASPA Path Validation:** {aspa['checked']} paths checked "
+                    f"({aspa['valid']} valid, {aspa['invalid']} invalid, "
+                    f"{aspa['unknown']} unknown)"
+                )
+                if aspa["invalid"] > 0:
+                    summary.append("  ⚠️ ASPA violations detected — possible route leak")
                 summary.append("")
 
             # Risk factors summary

@@ -19,6 +19,7 @@ Usage:
     claude
 """
 
+import ipaddress
 import logging
 import sys
 from datetime import UTC, datetime, timedelta
@@ -28,6 +29,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
+from bgp_explorer.analysis.aspa_validation import ASPAValidator, create_aspa_validator
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
 from bgp_explorer.sources.globalping import GlobalpingClient
@@ -67,6 +69,7 @@ _peeringdb: PeeringDBClient | None = None
 _path_analyzer: PathAnalyzer | None = None
 _as_analyzer: ASAnalyzer | None = None
 _resilience_assessor: ResilienceAssessor | None = None
+_aspa_validator: ASPAValidator | None = None
 
 
 async def get_ripe_stat() -> RipeStatClient:
@@ -129,6 +132,15 @@ def get_resilience_assessor() -> ResilienceAssessor:
     if _resilience_assessor is None:
         _resilience_assessor = ResilienceAssessor()
     return _resilience_assessor
+
+
+async def get_aspa_validator() -> ASPAValidator | None:
+    """Get or create ASPAValidator (lazy initialization)."""
+    global _aspa_validator
+    if _aspa_validator is None:
+        monocle = await get_monocle()
+        _aspa_validator = create_aspa_validator(monocle=monocle)
+    return _aspa_validator
 
 
 # =============================================================================
@@ -587,9 +599,12 @@ async def get_rpki_status(
         client = await get_ripe_stat()
         status = await client.get_rpki_validation(prefix, origin_asn)
 
-        status_label = {"valid": "VALID", "invalid": "INVALID", "not-found": "NOT FOUND"}.get(
-            status, "UNKNOWN"
-        )
+        status_label = {
+            "valid": "VALID",
+            "invalid": "INVALID",
+            "not-found": "NOT FOUND",
+            "unknown": "NOT FOUND",
+        }.get(status, "UNKNOWN")
 
         summary = [
             "**RPKI Validation**",
@@ -930,6 +945,27 @@ async def check_prefix_anomalies(
         except Exception:
             indicators["origin_history"] = {"error": "Could not fetch history"}
 
+        # ASPA validation on unique AS paths (if available)
+        aspa_indicators = {"checked": 0, "valid": 0, "invalid": 0, "unknown": 0}
+        validator = await get_aspa_validator()
+        if validator:
+            try:
+                seen_paths: set[tuple[int, ...]] = set()
+                for route in routes:
+                    if route.as_path:
+                        path_tuple = tuple(route.as_path)
+                        if path_tuple not in seen_paths and len(seen_paths) < 5:
+                            seen_paths.add(path_tuple)
+                            aspa_result = await validator.validate_path(list(path_tuple))
+                            aspa_indicators["checked"] += 1
+                            aspa_indicators[aspa_result.state.value] += 1
+                            if aspa_result.state.value == "invalid":
+                                risk_factors.append("ASPA Invalid: route leak detected in AS path")
+            except Exception:
+                pass
+
+        indicators["aspa"] = aspa_indicators
+
         # Calculate risk level
         if any("RPKI Invalid" in rf for rf in risk_factors):
             risk_level = "high"
@@ -964,6 +1000,18 @@ async def check_prefix_anomalies(
         if indicators["visibility"]["status"] == "limited":
             summary.append("  Warning: Limited visibility may indicate filtering or recent change")
         summary.append("")
+
+        # ASPA section
+        aspa = indicators["aspa"]
+        if aspa["checked"] > 0:
+            summary.append(
+                f"**ASPA Path Validation:** {aspa['checked']} paths checked "
+                f"({aspa['valid']} valid, {aspa['invalid']} invalid, "
+                f"{aspa['unknown']} unknown)"
+            )
+            if aspa["invalid"] > 0:
+                summary.append("  Warning: ASPA violations detected - possible route leak")
+            summary.append("")
 
         if risk_factors:
             summary.append("**Risk Factors:**")
@@ -1049,6 +1097,14 @@ async def get_as_upstreams(
         upstreams = await monocle.get_as_upstreams(asn)
 
         if not upstreams:
+            # Check if ASN has any relationships at all to distinguish
+            # real transit-free networks from non-existent ASNs
+            all_rels = await monocle.get_as_relationships(asn)
+            if not all_rels:
+                return (
+                    f"No data found for AS{asn}. "
+                    f"This ASN may not exist or may have no visible routes in global BGP data."
+                )
             return f"No upstream providers found for AS{asn}. This AS may be a transit-free network (Tier 1)."
 
         summary = [
@@ -1214,12 +1270,16 @@ async def get_as_connectivity_summary(
         summary.append("")
 
         # Peers section
-        summary.append(f"**Peers:** {len(connectivity.peers)}")
+        peer_count = len(connectivity.peers)
+        if peer_count > 5:
+            summary.append(f"**Peers:** {peer_count} (showing top 5)")
+        else:
+            summary.append(f"**Peers:** {peer_count}")
         for peer in connectivity.peers[:5]:
             name_str = f" {peer.name}" if peer.name else ""
             summary.append(f"  - AS{peer.asn}{name_str} ({peer.peers_percent:.1f}% visibility)")
-        if len(connectivity.peers) > 5:
-            summary.append(f"  ... and {len(connectivity.peers) - 5} more")
+        if peer_count > 5:
+            summary.append(f"  ... and {peer_count - 5} more")
         summary.append("")
 
         # Downstreams section
@@ -1241,6 +1301,33 @@ async def get_as_connectivity_summary(
 # =============================================================================
 # Globalping Tools (Network probing)
 # =============================================================================
+
+# RFC 5737 documentation prefixes and other non-routable ranges
+_BOGON_NETWORKS = [
+    ipaddress.ip_network("192.0.2.0/24"),     # TEST-NET-1 (RFC 5737)
+    ipaddress.ip_network("198.51.100.0/24"),   # TEST-NET-2 (RFC 5737)
+    ipaddress.ip_network("203.0.113.0/24"),    # TEST-NET-3 (RFC 5737)
+]
+
+
+def _check_bogon_target(target: str) -> str | None:
+    """Check if a target IP is in a bogon/documentation range.
+
+    Returns a user-friendly error message if bogon, None otherwise.
+    """
+    try:
+        addr = ipaddress.ip_address(target)
+    except ValueError:
+        return None  # Hostname, not an IP — let Globalping handle it
+
+    for network in _BOGON_NETWORKS:
+        if addr in network:
+            return (
+                f"Target {target} is in a documentation/test range ({network}, RFC 5737) "
+                f"and cannot be probed. These addresses are not routable on the public Internet."
+            )
+
+    return None
 
 
 @mcp.tool()
@@ -1271,6 +1358,10 @@ async def ping_from_global(
 
     Data source: Globalping API.
     """
+    bogon_msg = _check_bogon_target(target)
+    if bogon_msg:
+        return bogon_msg
+
     globalping = await get_globalping()
     if globalping is None:
         return "Globalping is not configured."
@@ -1356,6 +1447,10 @@ async def traceroute_from_global(
 
     Data source: Globalping API.
     """
+    bogon_msg = _check_bogon_target(target)
+    if bogon_msg:
+        return bogon_msg
+
     globalping = await get_globalping()
     if globalping is None:
         return "Globalping is not configured."
@@ -1781,6 +1876,96 @@ async def assess_network_resilience(
 
     except Exception as e:
         return f"Error assessing network resilience for AS{asn}: {e}"
+
+
+# =============================================================================
+# ASPA Validation Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def verify_aspa_path(
+    as_path: Annotated[
+        str,
+        Field(
+            description="Comma-separated AS path to validate (e.g., '13335,174,15169'). "
+            "Order: origin AS first, collector-side AS last."
+        ),
+    ],
+) -> str:
+    """Verify ASPA (AS Provider Authorization) for a BGP AS path.
+
+    Checks whether each hop in the path represents an authorized
+    customer-provider relationship, and whether the path follows
+    valley-free routing (no route leaks).
+
+    This complements RPKI ROA validation: ROA checks origin authorization,
+    ASPA checks path authorization (route leak detection).
+
+    Uses Monocle AS relationship data as a proxy for ASPA objects.
+
+    Requires the monocle binary to be installed.
+    """
+    validator = await get_aspa_validator()
+    if validator is None:
+        return (
+            "ASPA validation requires Monocle for AS relationship data. "
+            "Install with: cargo install monocle"
+        )
+
+    try:
+        asns = []
+        for part in as_path.split(","):
+            part = part.strip()
+            if part:
+                asns.append(int(part))
+
+        if not asns:
+            return "Please provide a valid AS path (e.g., '13335,174,15169')."
+
+        result = await validator.validate_path(asns)
+
+        path_str = " -> ".join(f"AS{asn}" for asn in result.as_path)
+        state_emoji = {
+            "valid": "VALID", "invalid": "INVALID",
+            "unknown": "UNKNOWN", "unverifiable": "UNVERIFIABLE",
+        }.get(result.state.value, "ERROR")
+
+        summary = [
+            f"**ASPA Path Verification: {path_str}**",
+            "",
+            f"**State:** {state_emoji}",
+            f"**Valley-free:** {'Yes' if result.valley_free else 'No (possible route leak)'}",
+            "",
+        ]
+
+        if result.hop_results:
+            summary.append("**Per-hop analysis:**")
+            for hop in result.hop_results:
+                auth_str = {
+                    True: "authorized",
+                    False: "not authorized",
+                    None: "unknown",
+                }[hop.is_authorized_provider]
+                summary.append(
+                    f"  - AS{hop.asn} -> AS{hop.next_asn}: "
+                    f"{auth_str} ({hop.relationship_type})"
+                )
+            summary.append("")
+
+        if result.issues:
+            summary.append("**Issues:**")
+            for issue in result.issues:
+                summary.append(f"  - {issue}")
+        else:
+            summary.append("**No issues detected.** Path authorization looks good.")
+
+        return "\n".join(summary)
+
+    except ValueError:
+        return "Invalid AS path format. Use comma-separated ASNs (e.g., '13335,174,15169')."
+    except Exception as e:
+        return f"Error verifying ASPA path: {e}"
 
 
 # =============================================================================

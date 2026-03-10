@@ -1020,3 +1020,184 @@ class TestAssessNetworkResilience:
         assert tools_full.assess_network_resilience.__doc__ is not None
         assert "resilience" in tools_full.assess_network_resilience.__doc__.lower()
         assert "score" in tools_full.assess_network_resilience.__doc__.lower()
+
+
+class TestVerifyAspaPath:
+    """Tests for verify_aspa_path tool."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        """Create a mock RIPE Stat client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def mock_monocle(self):
+        """Create a mock Monocle client."""
+        from bgp_explorer.models.as_relationship import ASRelationship
+
+        mock = AsyncMock()
+
+        # Default: return upstreams that indicate authorized providers
+        # For path 13335 -> 174 -> 15169:
+        # - AS13335 has upstream 174
+        # - AS174 has upstream 15169
+        def get_upstreams_side_effect(asn):
+            if asn == 13335:
+                return [
+                    ASRelationship(
+                        asn1=13335,
+                        asn2=174,
+                        asn2_name="Cogent",
+                        connected_pct=80.0,
+                        peer_pct=0.0,
+                        as1_upstream_pct=0.0,
+                        as2_upstream_pct=100.0,
+                    )
+                ]
+            elif asn == 174:
+                return [
+                    ASRelationship(
+                        asn1=174,
+                        asn2=15169,
+                        asn2_name="Google",
+                        connected_pct=70.0,
+                        peer_pct=0.0,
+                        as1_upstream_pct=0.0,
+                        as2_upstream_pct=100.0,
+                    )
+                ]
+            return []
+
+        mock.get_as_upstreams.side_effect = get_upstreams_side_effect
+        mock.check_relationship.return_value = None
+
+        return mock
+
+    @pytest.fixture
+    def tools_with_monocle(self, mock_ripe_stat, mock_monocle):
+        """Create BGPTools instance with Monocle."""
+        return BGPTools(ripe_stat=mock_ripe_stat, monocle=mock_monocle)
+
+    @pytest.mark.asyncio
+    async def test_verify_aspa_path_valid(self, tools_with_monocle, mock_monocle):
+        """Test ASPA validation with valid path where all hops are authorized."""
+        result = await tools_with_monocle.verify_aspa_path("13335,174,15169")
+
+        assert "VALID" in result
+        assert "authorized" in result.lower()
+        assert "AS13335" in result
+        assert "AS174" in result
+        assert "AS15169" in result
+
+    @pytest.mark.asyncio
+    async def test_verify_aspa_path_invalid(self, tools_with_monocle, mock_monocle):
+        """Test ASPA validation with invalid path where one hop is unauthorized."""
+        from bgp_explorer.models.as_relationship import ASRelationship
+
+        # Override: AS13335 has no known upstreams, check_relationship returns peer
+        def get_upstreams_invalid(asn):
+            if asn == 13335:
+                return []  # No upstreams known
+            elif asn == 174:
+                return [
+                    ASRelationship(
+                        asn1=174,
+                        asn2=15169,
+                        asn2_name="Google",
+                        connected_pct=70.0,
+                        peer_pct=0.0,
+                        as1_upstream_pct=0.0,
+                        as2_upstream_pct=100.0,
+                    )
+                ]
+            return []
+
+        mock_monocle.get_as_upstreams.side_effect = get_upstreams_invalid
+
+        # check_relationship returns peer relationship (not authorized)
+        mock_monocle.check_relationship.return_value = ASRelationship(
+            asn1=13335,
+            asn2=174,
+            asn2_name="Cogent",
+            connected_pct=60.0,
+            peer_pct=100.0,  # Peer, not upstream
+            as1_upstream_pct=0.0,
+            as2_upstream_pct=0.0,
+        )
+
+        result = await tools_with_monocle.verify_aspa_path("13335,174,15169")
+
+        assert "INVALID" in result
+        assert "not authorized" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_verify_aspa_path_no_monocle(self, mock_ripe_stat):
+        """Test ASPA validation when Monocle is not configured."""
+        tools = BGPTools(ripe_stat=mock_ripe_stat, monocle=None)
+
+        result = await tools.verify_aspa_path("13335,174,15169")
+
+        assert "Monocle" in result
+        assert "requires" in result.lower() or "not" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_verify_aspa_path_invalid_format(self, tools_with_monocle):
+        """Test ASPA validation with invalid AS path format."""
+        result = await tools_with_monocle.verify_aspa_path("abc,def")
+
+        assert "Invalid AS path format" in result
+
+    def test_verify_aspa_path_in_tools_list(self, tools_with_monocle):
+        """Test that verify_aspa_path appears in tools list when monocle is set."""
+        tool_funcs = tools_with_monocle.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "verify_aspa_path" in tool_names
+
+    def test_verify_aspa_path_excluded_when_no_monocle(self, mock_ripe_stat):
+        """Test that verify_aspa_path is excluded when monocle not available."""
+        tools = BGPTools(ripe_stat=mock_ripe_stat, monocle=None)
+        tool_funcs = tools.get_all_tools()
+        tool_names = [f.__name__ for f in tool_funcs]
+
+        assert "verify_aspa_path" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_check_prefix_anomalies_includes_aspa(self, mock_ripe_stat, mock_monocle):
+        """Test that check_prefix_anomalies includes ASPA validation step."""
+        tools = BGPTools(ripe_stat=mock_ripe_stat, monocle=mock_monocle)
+
+        # Setup mock routes with AS paths
+        mock_routes = [
+            BGPRoute(
+                prefix="8.8.8.0/24",
+                origin_asn=15169,
+                as_path=[13335, 174, 15169],
+                collector="rrc00",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            ),
+        ]
+        # Add more collectors for normal visibility
+        for i in range(10):
+            mock_routes.append(
+                BGPRoute(
+                    prefix="8.8.8.0/24",
+                    origin_asn=15169,
+                    as_path=[13335, 174, 15169],
+                    collector=f"rrc{i:02d}",
+                    timestamp=datetime.now(UTC),
+                    source="ripe_stat",
+                )
+            )
+
+        mock_ripe_stat.get_bgp_state.return_value = mock_routes
+        mock_ripe_stat.get_rpki_validation.return_value = "valid"
+        mock_ripe_stat.get_routing_history.return_value = {
+            "by_origin": [{"origin": "15169", "prefixes": []}]
+        }
+
+        result = await tools.check_prefix_anomalies("8.8.8.0/24")
+
+        assert "ASPA" in result
+        assert "paths checked" in result.lower() or "path" in result.lower()
