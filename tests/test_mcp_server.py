@@ -301,3 +301,147 @@ class TestConnectivitySummaryPeerCount:
         assert "**Peers:** 10" in result or "Peers (10" in result
         # Should indicate top 5 are shown
         assert "showing top" in result.lower() or "... and 5 more" in result
+
+
+class TestVerifyAspaPath:
+    """Tests for verify_aspa_path MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_verify_aspa_path_valid(self):
+        """Test that valid ASPA path shows VALID state and authorized hops."""
+        from bgp_explorer.models.aspa import ASPAHopResult, ASPAState, ASPAValidationResult
+
+        mock_validator = AsyncMock()
+        mock_validator.validate_path = AsyncMock(
+            return_value=ASPAValidationResult(
+                as_path=[13335, 174, 15169],
+                state=ASPAState.VALID,
+                hop_results=[
+                    ASPAHopResult(
+                        asn=13335,
+                        next_asn=174,
+                        is_authorized_provider=True,
+                        relationship_type="upstream",
+                        data_source="monocle",
+                        confidence=0.7,
+                    ),
+                    ASPAHopResult(
+                        asn=174,
+                        next_asn=15169,
+                        is_authorized_provider=True,
+                        relationship_type="upstream",
+                        data_source="monocle",
+                        confidence=0.7,
+                    ),
+                ],
+                valley_free=True,
+                issues=[],
+                summary="Path is valid",
+            )
+        )
+
+        with patch.object(
+            mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)
+        ):
+            result = await mcp_server.verify_aspa_path("13335,174,15169")
+
+        assert "VALID" in result
+        assert "authorized" in result
+        assert "AS13335" in result
+        assert "AS174" in result
+        assert "AS15169" in result
+
+    @pytest.mark.asyncio
+    async def test_mcp_verify_aspa_path_no_monocle(self):
+        """Test that missing monocle returns helpful error message."""
+        with patch.object(
+            mcp_server, "get_aspa_validator", AsyncMock(return_value=None)
+        ):
+            result = await mcp_server.verify_aspa_path("13335,174,15169")
+
+        assert "Monocle" in result
+        assert "cargo install monocle" in result
+
+    @pytest.mark.asyncio
+    async def test_mcp_verify_aspa_path_invalid_format(self):
+        """Test that non-numeric AS path returns format error."""
+        from bgp_explorer.models.aspa import ASPAState, ASPAValidationResult
+
+        # Validator must be non-None to pass the None check
+        mock_validator = AsyncMock()
+        mock_validator.validate_path = AsyncMock(
+            return_value=ASPAValidationResult(
+                as_path=[],
+                state=ASPAState.UNKNOWN,
+                hop_results=[],
+                valley_free=True,
+                issues=[],
+                summary="",
+            )
+        )
+
+        with patch.object(
+            mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)
+        ):
+            result = await mcp_server.verify_aspa_path("abc,def")
+
+        assert "Invalid AS path format" in result or "valid AS path" in result
+
+    @pytest.mark.asyncio
+    async def test_mcp_check_prefix_anomalies_includes_aspa(self):
+        """Test that check_prefix_anomalies includes ASPA validation section."""
+        from datetime import UTC, datetime
+
+        from bgp_explorer.models.aspa import ASPAHopResult, ASPAState, ASPAValidationResult
+        from bgp_explorer.models.route import BGPRoute
+
+        # Create 12 routes (>= 10 for normal visibility)
+        routes = [
+            BGPRoute(
+                prefix="8.8.8.0/24",
+                origin_asn=15169,
+                as_path=[3356, 15169],
+                collector=f"rrc{i:02d}",
+                timestamp=datetime.now(UTC),
+                source="ripe_stat",
+            )
+            for i in range(12)
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.get_bgp_state = AsyncMock(return_value=routes)
+        mock_client.get_rpki_validation = AsyncMock(return_value="valid")
+        mock_client.get_routing_history = AsyncMock(
+            return_value={"by_origin": [{"origin": "15169"}]}
+        )
+
+        mock_validator = AsyncMock()
+        mock_validator.validate_path = AsyncMock(
+            return_value=ASPAValidationResult(
+                as_path=[3356, 15169],
+                state=ASPAState.VALID,
+                hop_results=[
+                    ASPAHopResult(
+                        asn=3356,
+                        next_asn=15169,
+                        is_authorized_provider=True,
+                        relationship_type="upstream",
+                        data_source="monocle",
+                        confidence=0.7,
+                    ),
+                ],
+                valley_free=True,
+                issues=[],
+                summary="Path is valid",
+            )
+        )
+
+        with (
+            patch.object(mcp_server, "get_ripe_stat", return_value=mock_client),
+            patch.object(
+                mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)
+            ),
+        ):
+            result = await mcp_server.check_prefix_anomalies("8.8.8.0/24")
+
+        assert "ASPA" in result
