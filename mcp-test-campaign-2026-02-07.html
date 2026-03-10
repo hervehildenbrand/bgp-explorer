@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BGP Explorer MCP Server - Live Test Campaign Report (2026-02-07)</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242837;
+    --border: #2e3347;
+    --text: #e1e4ed;
+    --text-dim: #8b90a0;
+    --accent: #6c8cff;
+    --accent-dim: #3d5199;
+    --green: #4caf50;
+    --yellow: #ff9800;
+    --orange: #e65100;
+    --red: #f44336;
+    --purple: #b388ff;
+    --cyan: #4dd0e1;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+  }
+  .container { max-width: 1400px; margin: 0 auto; }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 2.5rem 0 1rem;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+  }
+  h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.5rem;
+    color: var(--text);
+  }
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .badge-pass { background: rgba(76,175,80,0.15); color: var(--green); }
+  .badge-warn { background: rgba(255,152,0,0.15); color: var(--yellow); }
+  .badge-fail { background: rgba(244,67,54,0.15); color: var(--red); }
+  .badge-info { background: rgba(108,140,255,0.15); color: var(--accent); }
+  .badge-count {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+  }
+
+  /* Summary grid */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .summary-stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    text-align: center;
+  }
+  .summary-stat .big {
+    font-size: 2.2rem;
+    font-weight: 700;
+  }
+  .summary-stat .label {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  /* Tables */
+  .heatmap { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  .heatmap th {
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 46px;
+    background: var(--bg);
+    z-index: 5;
+  }
+  .heatmap td {
+    padding: 6px 10px;
+    font-size: 0.85rem;
+    border-bottom: 1px solid rgba(46,51,71,0.5);
+  }
+  .heatmap td:first-child { font-weight: 600; color: var(--accent); width: 50px; }
+
+  /* Nav */
+  nav {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1.5rem;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+  }
+  nav a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.82rem;
+    transition: color 0.2s;
+    white-space: nowrap;
+  }
+  nav a:hover { color: var(--accent); }
+
+  code {
+    background: var(--surface2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.82rem;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+
+  /* Category header */
+  .cat-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.5rem 0 0.75rem;
+  }
+  .cat-header h3 { margin: 0; }
+  .cat-counts {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  /* Details/collapse */
+  details { margin-bottom: 0.75rem; }
+  details summary {
+    cursor: pointer;
+    padding: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  details summary:hover { border-color: var(--accent-dim); }
+  details[open] summary { border-radius: 6px 6px 0 0; border-bottom: none; }
+  details .inner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    padding: 0.75rem;
+  }
+
+  /* Issues */
+  .issue {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0 8px 8px 0;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.75rem;
+  }
+  .issue.p0 { border-left: 3px solid var(--red); }
+  .issue.p1 { border-left: 3px solid var(--orange); }
+  .issue.p2 { border-left: 3px solid var(--accent); }
+  .issue.p3 { border-left: 3px solid var(--text-dim); }
+  .priority {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+  }
+  .priority.p0 { background: rgba(244,67,54,0.2); color: var(--red); }
+  .priority.p1 { background: rgba(230,81,0,0.2); color: var(--orange); }
+  .priority.p2 { background: rgba(108,140,255,0.2); color: var(--accent); }
+  .priority.p3 { background: rgba(139,144,160,0.2); color: var(--text-dim); }
+  .issue-tool { color: var(--cyan); font-weight: 600; }
+  .issue-desc { margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-dim); }
+  .issue-rec { margin-top: 0.35rem; font-size: 0.85rem; color: var(--purple); }
+
+  /* Cross-tool */
+  .chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.5rem 0;
+    font-size: 0.82rem;
+  }
+  .chain-step {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+  .chain-step.pass { border-color: rgba(76,175,80,0.4); color: var(--green); }
+  .chain-step.warn { border-color: rgba(255,152,0,0.4); color: var(--yellow); }
+  .chain-arrow { color: var(--text-dim); font-size: 0.7rem; }
+
+  /* Progress bar */
+  .progress-bar {
+    width: 100%;
+    height: 24px;
+    background: var(--surface2);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    margin: 1rem 0;
+  }
+  .progress-bar .seg-pass { background: var(--green); }
+  .progress-bar .seg-warn { background: var(--yellow); }
+  .progress-bar .seg-fail { background: var(--red); }
+
+  /* Category cards */
+  .cat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+  .cat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .cat-card h4 {
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .cat-card .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin: 0.25rem 0;
+  }
+
+  /* Findings box */
+  .findings {
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 1rem;
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+  }
+  .findings p { margin-bottom: 0.5rem; }
+  .findings p:last-child { margin-bottom: 0; }
+  .findings strong { color: var(--accent); }
+  .findings .ok { color: var(--green); }
+  .findings .warn { color: var(--yellow); }
+  .findings .err { color: var(--red); }
+
+  .test-data {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-top: 0.25rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>BGP Explorer MCP Server - Live Test Campaign</h1>
+<p class="subtitle">
+  94 live tests across 22 tools &middot; 5 parallel agents &middot; 2026-02-07
+  <br>Test data: Google (AS15169), Cloudflare (AS13335), Level3 (AS3356), HE (AS6939), bogon 192.0.2.0/24
+</p>
+
+<nav>
+  <a href="#summary">Summary</a>
+  <a href="#issues">Issues</a>
+  <a href="#cat-a">RIPE Stat Core</a>
+  <a href="#cat-b">RIPE Stat Security</a>
+  <a href="#cat-c">Monocle</a>
+  <a href="#cat-d">Infrastructure</a>
+  <a href="#cat-e">Resilience &amp; Cross-tool</a>
+  <a href="#methodology">Methodology</a>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="summary">Executive Summary</h2>
+
+<div class="summary-grid">
+  <div class="summary-stat">
+    <div class="big" style="color: var(--text)">94</div>
+    <div class="label">Total Tests</div>
+  </div>
+  <div class="summary-stat">
+    <div class="big" style="color: var(--green)">88</div>
+    <div class="label">Passed</div>
+  </div>
+  <div class="summary-stat">
+    <div class="big" style="color: var(--yellow)">4</div>
+    <div class="label">Warnings</div>
+  </div>
+  <div class="summary-stat">
+    <div class="big" style="color: var(--red)">2</div>
+    <div class="label">Failed</div>
+  </div>
+  <div class="summary-stat">
+    <div class="big" style="color: var(--green)">93.6%</div>
+    <div class="label">Pass Rate</div>
+  </div>
+  <div class="summary-stat">
+    <div class="big" style="color: var(--accent)">22</div>
+    <div class="label">Tools Tested</div>
+  </div>
+</div>
+
+<div class="progress-bar">
+  <div class="seg-pass" style="width: 93.6%"></div>
+  <div class="seg-warn" style="width: 4.3%"></div>
+  <div class="seg-fail" style="width: 2.1%"></div>
+</div>
+
+<div class="cat-grid">
+  <div class="cat-card">
+    <h4>Agent A: RIPE Stat Core</h4>
+    <div class="stat-row"><span>Tests</span><span>22</span></div>
+    <div class="stat-row"><span>Pass</span><span style="color:var(--green)">22</span></div>
+    <div class="stat-row"><span>Warn</span><span>0</span></div>
+    <div class="stat-row"><span>Fail</span><span>0</span></div>
+  </div>
+  <div class="cat-card">
+    <h4>Agent B: RIPE Stat Security</h4>
+    <div class="stat-row"><span>Tests</span><span>20</span></div>
+    <div class="stat-row"><span>Pass</span><span style="color:var(--green)">19</span></div>
+    <div class="stat-row"><span>Warn</span><span style="color:var(--yellow)">1</span></div>
+    <div class="stat-row"><span>Fail</span><span>0</span></div>
+  </div>
+  <div class="cat-card">
+    <h4>Agent C: Monocle</h4>
+    <div class="stat-row"><span>Tests</span><span>18</span></div>
+    <div class="stat-row"><span>Pass</span><span style="color:var(--green)">17</span></div>
+    <div class="stat-row"><span>Warn</span><span style="color:var(--yellow)">1</span></div>
+    <div class="stat-row"><span>Fail</span><span>0</span></div>
+  </div>
+  <div class="cat-card">
+    <h4>Agent D: Infrastructure</h4>
+    <div class="stat-row"><span>Tests</span><span>22</span></div>
+    <div class="stat-row"><span>Pass</span><span style="color:var(--green)">19</span></div>
+    <div class="stat-row"><span>Warn</span><span style="color:var(--yellow)">1</span></div>
+    <div class="stat-row"><span>Fail</span><span style="color:var(--red)">2</span></div>
+  </div>
+  <div class="cat-card">
+    <h4>Agent E: Resilience + Cross-tool</h4>
+    <div class="stat-row"><span>Tests</span><span>12</span></div>
+    <div class="stat-row"><span>Pass</span><span style="color:var(--green)">11</span></div>
+    <div class="stat-row"><span>Warn</span><span style="color:var(--yellow)">1</span></div>
+    <div class="stat-row"><span>Fail</span><span>0</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <strong>Verdict:</strong> The MCP server is production-ready. All 22 tools function correctly for their primary use cases.
+  No P0 (crash/data corruption) or P1 (missing critical validation) issues found.
+  The 2 FAILs are from the Globalping API rejecting bogon target addresses with a generic error &mdash; an upstream API behavior, not a server bug.
+  All 6 identified issues are P2 (usability) or P3 (cosmetic). Previous P0/P1 fixes from the earlier campaign are confirmed holding.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="issues">Issues Found</h2>
+
+<p style="color: var(--text-dim); font-size: 0.9rem; margin-bottom: 1rem;">
+  0 P0 &middot; 0 P1 &middot; 4 P2 &middot; 2 P3 &mdash; sorted by severity
+</p>
+
+<div class="issue p2">
+  <span class="priority p2">P2</span>
+  <span class="issue-tool">get_as_upstreams</span> (Test C-08)
+  <div class="issue-desc">Non-existent ASN 9999999 returns "may be transit-free (Tier 1)" which is misleading. The tool cannot distinguish between an actual Tier 1 network and an ASN that simply has no data.</div>
+  <div class="issue-rec">Recommendation: Detect zero data across all relationship types and return "No data found for ASN &mdash; may not exist or have no visible routes" instead of implying Tier 1 status.</div>
+</div>
+
+<div class="issue p2">
+  <span class="priority p2">P2</span>
+  <span class="issue-tool">ping_from_global / traceroute_from_global</span> (Tests D-03, D-07)
+  <div class="issue-desc">Bogon/TEST-NET addresses (192.0.2.1) are rejected by the Globalping API with a generic "Parameter validation failed" error. The MCP server passes this through without additional context.</div>
+  <div class="issue-rec">Recommendation: Intercept known bogon ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) and return a user-friendly message: "Target is in a documentation/test range (RFC 5737) and cannot be probed."</div>
+</div>
+
+<div class="issue p2">
+  <span class="priority p2">P2</span>
+  <span class="issue-tool">get_rpki_status</span> (Test B-04)
+  <div class="issue-desc">Returns "UNKNOWN" for prefixes with no ROA, but the tool docstring documents the status as "not-found". The functionality is correct but the terminology is inconsistent with documentation.</div>
+  <div class="issue-rec">Recommendation: Align the returned status string with the documented value, or update the documentation to match the actual output.</div>
+</div>
+
+<div class="issue p2">
+  <span class="priority p2">P2</span>
+  <span class="issue-tool">get_as_peers / get_as_connectivity_summary</span> (Test E-07)
+  <div class="issue-desc">Peer count terminology is ambiguous. <code>get_as_peers</code> returns 475 peers for AS15169, while <code>get_as_connectivity_summary</code> shows only 5 in the "Peers" section (it's showing top-5 samples, but the section header could imply that's the total).</div>
+  <div class="issue-rec">Recommendation: In <code>get_as_connectivity_summary</code>, clarify that the "Peers" section shows top samples from a larger set, e.g., "Peers (475 total, showing top 5):"</div>
+</div>
+
+<div class="issue p3">
+  <span class="priority p3">P3</span>
+  <span class="issue-tool">analyze_as_path / compare_collectors</span> (Tests B-08, B-12)
+  <div class="issue-desc">Error responses for invalid input expose raw RIPE Stat API URLs in the error message (e.g., "400 Bad Request from https://stat.ripe.net/data/...").</div>
+  <div class="issue-rec">Recommendation: Wrap API errors to provide a cleaner message like "Invalid prefix format" without exposing the backend URL.</div>
+</div>
+
+<div class="issue p3">
+  <span class="priority p3">P3</span>
+  <span class="issue-tool">get_network_contacts</span> (Test D-20)
+  <div class="issue-desc">Google AS15169 returns no public contacts (only website). While this is accurate PeeringDB data, the tool could note that some large networks intentionally limit public contact info.</div>
+  <div class="issue-rec">Recommendation: When contacts are empty for well-known ASNs, add a note: "This network does not publish contact details on PeeringDB. Try their website or abuse contact from WHOIS."</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="cat-a">Agent A: RIPE Stat Core (22 tests)</h2>
+
+<div class="cat-header">
+  <div class="cat-counts">
+    <span class="badge badge-pass">22 PASS</span>
+    <span class="badge badge-warn">0 WARN</span>
+    <span class="badge badge-fail">0 FAIL</span>
+  </div>
+</div>
+
+<h3>search_asn (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>A-01</td><td>Happy path</td><td><code>query="Google"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Found 26 ASNs, AS15169 included</td></tr>
+<tr><td>A-02</td><td>Happy path</td><td><code>query="Cloudflare"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Found 10 ASNs, AS13335 included</td></tr>
+<tr><td>A-03</td><td>Edge case</td><td><code>query="xyznonexistent12345"</code></td><td><span class="badge badge-pass">PASS</span></td><td>No ASNs found, graceful message</td></tr>
+<tr><td>A-04</td><td>Validation</td><td><code>query=""</code></td><td><span class="badge badge-pass">PASS</span></td><td>Rejected: "Please provide a non-empty search query"</td></tr>
+</table>
+
+<h3>lookup_prefix (6 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>A-05</td><td>Happy path</td><td><code>prefix="8.8.8.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Origin AS15169, 359 collectors, 276 unique paths</td></tr>
+<tr><td>A-06</td><td>Happy path</td><td><code>prefix="1.1.1.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Origin AS13335, 360 collectors, 271 paths</td></tr>
+<tr><td>A-07</td><td>Edge case</td><td><code>prefix="192.0.2.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No routes found" as expected</td></tr>
+<tr><td>A-08</td><td>Validation</td><td><code>prefix="8.8.8.0"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Rejected with CIDR notation error</td></tr>
+<tr><td>A-09</td><td>Validation</td><td><code>prefix="not-a-prefix"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Rejected with CIDR notation error</td></tr>
+<tr><td>A-10</td><td>Edge case</td><td><code>prefix="2001:4860:4860::/48"</code></td><td><span class="badge badge-pass">PASS</span></td><td>IPv6 handled, no routes (not announced as aggregate)</td></tr>
+</table>
+
+<h3>get_asn_announcements (5 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>A-11</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>1252 prefixes (1106 IPv4, 146 IPv6)</td></tr>
+<tr><td>A-12</td><td>Happy path</td><td><code>asn=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>5618 prefixes (2461 IPv4, 3157 IPv6)</td></tr>
+<tr><td>A-13</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"Not announcing any prefixes, or ASN does not exist"</td></tr>
+<tr><td>A-14</td><td>Happy path</td><td><code>asn=15169, address_family=6</code></td><td><span class="badge badge-pass">PASS</span></td><td>Correctly filtered to IPv6 only</td></tr>
+<tr><td>A-15</td><td>Happy path</td><td><code>asn=15169, address_family=4</code></td><td><span class="badge badge-pass">PASS</span></td><td>Correctly filtered to IPv4 only</td></tr>
+</table>
+
+<h3>get_routing_history (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>A-16</td><td>Happy path</td><td><code>resource="8.8.8.0/24", 2025-01-01..01-31</code></td><td><span class="badge badge-pass">PASS</span></td><td>Routing data with AS15169 and AS3356 origins</td></tr>
+<tr><td>A-17</td><td>Edge case</td><td><code>resource="192.0.2.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No routing history found for this period"</td></tr>
+<tr><td>A-18</td><td>Validation</td><td><code>start > end (reversed dates)</code></td><td><span class="badge badge-pass">PASS</span></td><td>Rejected: "start_date is after end_date. Please swap them"</td></tr>
+<tr><td>A-19</td><td>Edge case</td><td><code>resource="AS15169"</code></td><td><span class="badge badge-pass">PASS</span></td><td>ASN resource works, returns prefix routing history</td></tr>
+</table>
+
+<h3>get_bgp_path_history (3 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>A-20</td><td>Happy path</td><td><code>prefix="8.8.8.0/24", 2025-01-01..01-07</code></td><td><span class="badge badge-pass">PASS</span></td><td>391 initial paths, 169 announcements, 8 withdrawals</td></tr>
+<tr><td>A-21</td><td>Validation</td><td><code>reversed dates</code></td><td><span class="badge badge-pass">PASS</span></td><td>Rejected: "start_date is after end_date"</td></tr>
+<tr><td>A-22</td><td>Edge case</td><td><code>prefix="192.0.2.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No path changes detected"</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="cat-b">Agent B: RIPE Stat Security (20 tests)</h2>
+
+<div class="cat-header">
+  <div class="cat-counts">
+    <span class="badge badge-pass">19 PASS</span>
+    <span class="badge badge-warn">1 WARN</span>
+    <span class="badge badge-fail">0 FAIL</span>
+  </div>
+</div>
+
+<h3>get_rpki_status (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>B-01</td><td>Happy path</td><td><code>prefix="1.1.1.0/24", origin=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>RPKI status: VALID</td></tr>
+<tr><td>B-02</td><td>Happy path</td><td><code>prefix="8.8.8.0/24", origin=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>RPKI status: VALID</td></tr>
+<tr><td>B-03</td><td>Edge case</td><td><code>prefix="8.8.8.0/24", origin=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>RPKI status: INVALID (wrong ASN detected)</td></tr>
+<tr><td>B-04</td><td>Edge case</td><td><code>prefix="192.0.2.0/24", origin=1</code></td><td><span class="badge badge-pass">PASS</span></td><td>RPKI status: UNKNOWN (no ROA)</td></tr>
+</table>
+
+<h3>analyze_as_path (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>B-05</td><td>Happy path</td><td><code>prefix="8.8.8.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>276 unique paths, 359 collectors, path lengths 2-4</td></tr>
+<tr><td>B-06</td><td>Happy path</td><td><code>prefix="1.1.1.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>271 unique paths, 360 collectors, path lengths 1-4</td></tr>
+<tr><td>B-07</td><td>Edge case</td><td><code>prefix="192.0.2.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No routes found"</td></tr>
+<tr><td>B-08</td><td>Validation</td><td><code>prefix="invalid"</code></td><td><span class="badge badge-pass">PASS</span></td><td>400 Bad Request (exposes API URL &mdash; P3)</td></tr>
+</table>
+
+<h3>compare_collectors (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>B-09</td><td>Happy path</td><td><code>prefix="8.8.8.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>359 collectors, 276 paths, consistent origin</td></tr>
+<tr><td>B-10</td><td>Happy path</td><td><code>prefix="1.1.1.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>360 collectors, 271 paths, consistent origin</td></tr>
+<tr><td>B-11</td><td>Edge case</td><td><code>prefix="192.0.2.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No routes found"</td></tr>
+<tr><td>B-12</td><td>Validation</td><td><code>prefix="not-cidr"</code></td><td><span class="badge badge-pass">PASS</span></td><td>400 Bad Request (exposes API URL &mdash; P3)</td></tr>
+</table>
+
+<h3>get_asn_details (5 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>B-13</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>Google: 1252 prefixes (1106 IPv4, 146 IPv6)</td></tr>
+<tr><td>B-14</td><td>Happy path</td><td><code>asn=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>Cloudflare: 5618 prefixes (2461 IPv4, 3157 IPv6)</td></tr>
+<tr><td>B-15</td><td>Happy path</td><td><code>asn=3356</code></td><td><span class="badge badge-pass">PASS</span></td><td>Level3/Lumen: 1139 prefixes, transit behavior</td></tr>
+<tr><td>B-16</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"Not announcing" message</td></tr>
+<tr><td>B-17</td><td>Edge case</td><td><code>asn=64512</code></td><td><span class="badge badge-warn">WARN</span></td><td>Private ASN returns 4 prefixes (routing leaks in global table)</td></tr>
+</table>
+
+<h3>check_prefix_anomalies (3 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>B-18</td><td>Happy path</td><td><code>prefix="8.8.8.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>LOW risk, single origin AS15169, RPKI valid</td></tr>
+<tr><td>B-19</td><td>Happy path</td><td><code>prefix="1.1.1.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>LOW risk, single origin AS13335, RPKI valid</td></tr>
+<tr><td>B-20</td><td>Edge case</td><td><code>prefix="192.0.2.0/24"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"Not routed" status</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="cat-c">Agent C: Monocle / AS Relationships (18 tests)</h2>
+
+<div class="cat-header">
+  <div class="cat-counts">
+    <span class="badge badge-pass">17 PASS</span>
+    <span class="badge badge-warn">1 WARN</span>
+    <span class="badge badge-fail">0 FAIL</span>
+  </div>
+</div>
+
+<h3>get_as_peers (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>C-01</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>475 peers with visibility scores</td></tr>
+<tr><td>C-02</td><td>Happy path</td><td><code>asn=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>1590 peers with visibility scores</td></tr>
+<tr><td>C-03</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No peer relationships found"</td></tr>
+<tr><td>C-04</td><td>Edge case</td><td><code>asn=64512</code></td><td><span class="badge badge-pass">PASS</span></td><td>32 peers (private ASN visible in global routing)</td></tr>
+</table>
+
+<h3>get_as_upstreams (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>C-05</td><td>Happy path</td><td><code>asn=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>128 upstream providers</td></tr>
+<tr><td>C-06</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>8 upstreams (Telia, Level3, Cogent, etc.)</td></tr>
+<tr><td>C-07</td><td>Edge case</td><td><code>asn=3356</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No upstreams &mdash; may be Tier 1" (correct)</td></tr>
+<tr><td>C-08</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-warn">WARN</span></td><td>"May be transit-free (Tier 1)" &mdash; misleading for non-existent ASN (P2)</td></tr>
+</table>
+
+<h3>get_as_downstreams (3 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>C-09</td><td>Happy path</td><td><code>asn=3356</code></td><td><span class="badge badge-pass">PASS</span></td><td>6258 downstream customers</td></tr>
+<tr><td>C-10</td><td>Happy path</td><td><code>asn=6939</code></td><td><span class="badge badge-pass">PASS</span></td><td>8233 downstream customers</td></tr>
+<tr><td>C-11</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No downstreams &mdash; may be stub"</td></tr>
+</table>
+
+<h3>check_as_relationship (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>C-12</td><td>Happy path</td><td><code>asn1=15169, asn2=3356</code></td><td><span class="badge badge-pass">PASS</span></td><td>AS3356 is upstream (provider) to AS15169 at 25%</td></tr>
+<tr><td>C-13</td><td>Happy path</td><td><code>asn1=13335, asn2=6939</code></td><td><span class="badge badge-pass">PASS</span></td><td>AS6939 is upstream (provider) to AS13335 at 25.7%</td></tr>
+<tr><td>C-14</td><td>Edge case</td><td><code>asn1=15169, asn2=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No direct relationship" (same AS handled)</td></tr>
+<tr><td>C-15</td><td>Edge case</td><td><code>asn1=15169, asn2=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No direct relationship"</td></tr>
+</table>
+
+<h3>get_as_connectivity_summary (3 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>C-16</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>521 neighbors (5 upstreams, peers, downstreams shown)</td></tr>
+<tr><td>C-17</td><td>Happy path</td><td><code>asn=3356</code></td><td><span class="badge badge-pass">PASS</span></td><td>13586 neighbors, 0 upstreams (confirms Tier 1)</td></tr>
+<tr><td>C-18</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"No connectivity data for AS9999999"</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="cat-d">Agent D: Infrastructure / Globalping + PeeringDB (22 tests)</h2>
+
+<div class="cat-header">
+  <div class="cat-counts">
+    <span class="badge badge-pass">19 PASS</span>
+    <span class="badge badge-warn">1 WARN</span>
+    <span class="badge badge-fail">2 FAIL</span>
+  </div>
+</div>
+
+<h3>ping_from_global (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>D-01</td><td>Happy path</td><td><code>target="8.8.8.8"</code></td><td><span class="badge badge-pass">PASS</span></td><td>40 probes, avg 6.62ms latency</td></tr>
+<tr><td>D-02</td><td>Happy path</td><td><code>target="1.1.1.1", locations=["US","DE"]</code></td><td><span class="badge badge-pass">PASS</span></td><td>20 probes from US and DE, avg 2.94ms</td></tr>
+<tr><td>D-03</td><td>Edge case</td><td><code>target="192.0.2.1"</code></td><td><span class="badge badge-fail">FAIL</span></td><td>Globalping API: "Parameter validation failed" (P2)</td></tr>
+<tr><td>D-04</td><td>Happy path</td><td><code>target="google.com"</code></td><td><span class="badge badge-pass">PASS</span></td><td>40 probes, avg 12.74ms, hostname resolved</td></tr>
+</table>
+
+<h3>traceroute_from_global (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>D-05</td><td>Happy path</td><td><code>target="8.8.8.8"</code></td><td><span class="badge badge-pass">PASS</span></td><td>19 probes with multi-hop traces to dns.google</td></tr>
+<tr><td>D-06</td><td>Happy path</td><td><code>target="1.1.1.1", locations=["US"]</code></td><td><span class="badge badge-pass">PASS</span></td><td>5 probes from US, reaching one.one.one.one</td></tr>
+<tr><td>D-07</td><td>Edge case</td><td><code>target="192.0.2.1"</code></td><td><span class="badge badge-fail">FAIL</span></td><td>Globalping API: "Parameter validation failed" (P2)</td></tr>
+<tr><td>D-08</td><td>Happy path</td><td><code>target="cloudflare.com"</code></td><td><span class="badge badge-pass">PASS</span></td><td>19 probes, reaching 104.16.x.x endpoints</td></tr>
+</table>
+
+<h3>get_ixps_for_asn (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>D-09</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>Google present at 347 IXPs globally</td></tr>
+<tr><td>D-10</td><td>Happy path</td><td><code>asn=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>Cloudflare present at 409 IXPs</td></tr>
+<tr><td>D-11</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"Not present at any IXPs"</td></tr>
+<tr><td>D-12</td><td>Happy path</td><td><code>asn=6939</code></td><td><span class="badge badge-pass">PASS</span></td><td>HE present at 327 IXPs</td></tr>
+</table>
+
+<h3>get_networks_at_ixp (4 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>D-13</td><td>Happy path</td><td><code>ixp="AMS-IX"</code></td><td><span class="badge badge-pass">PASS</span></td><td>851 participants listed</td></tr>
+<tr><td>D-14</td><td>Happy path</td><td><code>ixp="DE-CIX Frankfurt"</code></td><td><span class="badge badge-pass">PASS</span></td><td>1015 participants</td></tr>
+<tr><td>D-15</td><td>Edge case</td><td><code>ixp="NonExistentIXP12345"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"May not exist"</td></tr>
+<tr><td>D-16</td><td>Happy path</td><td><code>ixp="LINX"</code></td><td><span class="badge badge-pass">PASS</span></td><td>833 participants</td></tr>
+</table>
+
+<h3>get_ixp_details (3 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>D-17</td><td>Happy path</td><td><code>ixp="AMS-IX"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Amsterdam NL, 851 participants, website</td></tr>
+<tr><td>D-18</td><td>Happy path</td><td><code>ixp="DE-CIX Frankfurt"</code></td><td><span class="badge badge-pass">PASS</span></td><td>Frankfurt DE, 1015 participants</td></tr>
+<tr><td>D-19</td><td>Edge case</td><td><code>ixp="FakeIXP999"</code></td><td><span class="badge badge-pass">PASS</span></td><td>"Not found in PeeringDB"</td></tr>
+</table>
+
+<h3>get_network_contacts (3 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>D-20</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-warn">WARN</span></td><td>No public contacts (only website) &mdash; P3</td></tr>
+<tr><td>D-21</td><td>Happy path</td><td><code>asn=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>4 contacts (NOC, Abuse, Policy) with emails/phones</td></tr>
+<tr><td>D-22</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>"Not found in PeeringDB"</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="cat-e">Agent E: Resilience &amp; Cross-tool Consistency (12 tests)</h2>
+
+<div class="cat-header">
+  <div class="cat-counts">
+    <span class="badge badge-pass">11 PASS</span>
+    <span class="badge badge-warn">1 WARN</span>
+    <span class="badge badge-fail">0 FAIL</span>
+  </div>
+</div>
+
+<h3>assess_network_resilience (5 tests)</h3>
+<table class="heatmap">
+<tr><th>ID</th><th>Type</th><th>Input</th><th>Status</th><th>Result</th></tr>
+<tr><td>E-01</td><td>Happy path</td><td><code>asn=15169</code></td><td><span class="badge badge-pass">PASS</span></td><td>Google: 10.0/10, 8 upstreams, 475 peers, 347 IXPs</td></tr>
+<tr><td>E-02</td><td>Happy path</td><td><code>asn=13335</code></td><td><span class="badge badge-pass">PASS</span></td><td>Cloudflare: 10.0/10, 128 upstreams, 1590 peers, 409 IXPs</td></tr>
+<tr><td>E-03</td><td>Happy path</td><td><code>asn=3356</code></td><td><span class="badge badge-pass">PASS</span></td><td>Lumen: 9.2/10, Tier-1 transit-free, 3 IXPs</td></tr>
+<tr><td>E-04</td><td>Edge case</td><td><code>asn=9999999</code></td><td><span class="badge badge-pass">PASS</span></td><td>1.0/10 with all 0% &mdash; graceful with recommendations</td></tr>
+<tr><td>E-05</td><td>Happy path</td><td><code>asn=6939</code></td><td><span class="badge badge-pass">PASS</span></td><td>HE: 10.0/10, Tier-1, 2652 peers, 327 IXPs</td></tr>
+</table>
+
+<h3>Cross-tool Consistency (7 tests)</h3>
+
+<div class="card">
+  <strong>E-06: RPKI Consistency</strong>
+  <span class="badge badge-pass">PASS</span>
+  <div class="chain">
+    <span class="chain-step pass">get_rpki_status(1.1.1.0/24, 13335) &rarr; VALID</span>
+    <span class="chain-arrow">&harr;</span>
+    <span class="chain-step pass">check_prefix_anomalies(1.1.1.0/24) &rarr; RPKI VALID</span>
+  </div>
+  <div class="test-data">Both tools report consistent RPKI VALID status for Cloudflare's 1.1.1.0/24</div>
+</div>
+
+<div class="card">
+  <strong>E-07: Peer Count Consistency</strong>
+  <span class="badge badge-warn">WARN</span>
+  <div class="chain">
+    <span class="chain-step pass">get_as_peers(15169) &rarr; 475 peers</span>
+    <span class="chain-arrow">&harr;</span>
+    <span class="chain-step warn">connectivity_summary(15169) &rarr; 521 neighbors (top 5 shown per category)</span>
+  </div>
+  <div class="test-data">Not a data error but terminology is confusing: "Peers" section shows only top 5, while total includes all relationship types. See P2 issue above.</div>
+</div>
+
+<div class="card">
+  <strong>E-08: Prefix Count Consistency</strong>
+  <span class="badge badge-pass">PASS</span>
+  <div class="chain">
+    <span class="chain-step pass">get_asn_details(13335) &rarr; 5618 prefixes (2461 IPv4, 3157 IPv6)</span>
+    <span class="chain-arrow">&harr;</span>
+    <span class="chain-step pass">get_asn_announcements(13335) &rarr; 5618 prefixes (2461 IPv4, 3157 IPv6)</span>
+  </div>
+  <div class="test-data">Exact match across both tools for Cloudflare's prefix counts.</div>
+</div>
+
+<div class="card">
+  <strong>E-09: Prefix Origin Consistency</strong>
+  <span class="badge badge-pass">PASS</span>
+  <div class="chain">
+    <span class="chain-step pass">lookup_prefix(8.8.8.0/24) &rarr; origin AS15169</span>
+    <span class="chain-arrow">&harr;</span>
+    <span class="chain-step pass">get_asn_announcements(15169) &rarr; 1252 prefixes (includes 8.8.8.0/24)</span>
+  </div>
+  <div class="test-data">Origin lookup and announcement list are consistent for Google DNS.</div>
+</div>
+
+<div class="card">
+  <strong>E-10: Upstream/Downstream Symmetry</strong>
+  <span class="badge badge-pass">PASS</span>
+  <div class="chain">
+    <span class="chain-step pass">get_as_upstreams(13335) &rarr; top upstream: AS9416 (92.6%)</span>
+    <span class="chain-arrow">&harr;</span>
+    <span class="chain-step pass">get_as_downstreams(9416) &rarr; includes AS13335 (92.6%)</span>
+  </div>
+  <div class="test-data">Perfect symmetry: AS9416 appears as Cloudflare's upstream, and Cloudflare appears as AS9416's downstream, both at 92.6% visibility.</div>
+</div>
+
+<div class="card">
+  <strong>E-11: IXP Cross-reference</strong>
+  <span class="badge badge-pass">PASS</span>
+  <div class="chain">
+    <span class="chain-step pass">get_ixps_for_asn(6939) &rarr; DE-CIX Frankfurt (800 Gbps)</span>
+    <span class="chain-arrow">&harr;</span>
+    <span class="chain-step pass">get_networks_at_ixp("DE-CIX Frankfurt") &rarr; 1015 participants</span>
+  </div>
+  <div class="test-data">HE's IXP presence at DE-CIX Frankfurt confirmed from both directions.</div>
+</div>
+
+<div class="card">
+  <strong>E-12: Search &rarr; Details Round-trip</strong>
+  <span class="badge badge-pass">PASS</span>
+  <div class="chain">
+    <span class="chain-step pass">search_asn("Cloudflare") &rarr; AS13335 (first result)</span>
+    <span class="chain-arrow">&rarr;</span>
+    <span class="chain-step pass">get_asn_details(13335) &rarr; 5618 prefixes</span>
+  </div>
+  <div class="test-data">Full workflow: search by name, get ASN, then retrieve details. Seamless.</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="methodology">Methodology</h2>
+
+<div class="card">
+  <h3>Test Architecture</h3>
+  <p style="margin-top:0.5rem">5 parallel background agents ran live MCP tool calls against the bgp-explorer server. Each agent operated independently, testing its category of tools sequentially to avoid rate limiting.</p>
+
+  <h3 style="margin-top:1rem">Test Data</h3>
+  <table class="heatmap">
+    <tr><th>Network</th><th>ASN</th><th>Prefix</th><th>Role</th></tr>
+    <tr><td>Google</td><td>15169</td><td>8.8.8.0/24</td><td>Primary happy path (RPKI valid)</td></tr>
+    <tr><td>Cloudflare</td><td>13335</td><td>1.1.1.0/24</td><td>Secondary happy path (RPKI valid)</td></tr>
+    <tr><td>Level3/Lumen</td><td>3356</td><td>&mdash;</td><td>Tier 1 transit provider</td></tr>
+    <tr><td>Hurricane Electric</td><td>6939</td><td>&mdash;</td><td>Transit-free, massive peering</td></tr>
+    <tr><td>Non-existent</td><td>9999999</td><td>&mdash;</td><td>Error handling validation</td></tr>
+    <tr><td>Private ASN</td><td>64512</td><td>&mdash;</td><td>Edge case: private range</td></tr>
+    <tr><td>Bogon (RFC 5737)</td><td>&mdash;</td><td>192.0.2.0/24</td><td>Documentation prefix, not routed</td></tr>
+  </table>
+
+  <h3 style="margin-top:1rem">Severity Levels</h3>
+  <table class="heatmap">
+    <tr><th>Level</th><th>Criteria</th><th>Found</th></tr>
+    <tr><td><span class="priority p0">P0</span></td><td>Crash, data corruption, or incorrect data returned</td><td style="color:var(--green)">0</td></tr>
+    <tr><td><span class="priority p1">P1</span></td><td>Missing critical input validation, security concern</td><td style="color:var(--green)">0</td></tr>
+    <tr><td><span class="priority p2">P2</span></td><td>Usability issue, confusing output, misleading messages</td><td style="color:var(--accent)">4</td></tr>
+    <tr><td><span class="priority p3">P3</span></td><td>Cosmetic, minor UX improvement opportunity</td><td style="color:var(--text-dim)">2</td></tr>
+  </table>
+
+  <h3 style="margin-top:1rem">Previous Campaign Fixes Verified</h3>
+  <p style="margin-top:0.5rem">The following P0/P1/P2 issues from the previous campaign were retested and confirmed fixed:</p>
+  <ul style="margin-top:0.5rem; padding-left:1.5rem; color:var(--text-dim); font-size:0.9rem;">
+    <li><span style="color:var(--green)">FIXED</span> &mdash; Empty string validation on <code>search_asn</code> (A-04 confirms)</li>
+    <li><span style="color:var(--green)">FIXED</span> &mdash; CIDR notation validation on <code>lookup_prefix</code> (A-08, A-09 confirm)</li>
+    <li><span style="color:var(--green)">FIXED</span> &mdash; Reversed date validation on <code>get_routing_history</code> (A-18 confirms)</li>
+    <li><span style="color:var(--green)">FIXED</span> &mdash; Reversed date validation on <code>get_bgp_path_history</code> (A-21 confirms)</li>
+  </ul>
+</div>
+
+<div style="text-align:center; color:var(--text-dim); font-size:0.8rem; margin-top:3rem; padding-top:1rem; border-top:1px solid var(--border);">
+  Generated by Claude Code &middot; 94 live MCP tool calls &middot; 2026-02-07
+</div>
+
+</div>
+</body>
+</html>
