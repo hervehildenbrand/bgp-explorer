@@ -1872,6 +1872,28 @@ class BGPTools:
             except Exception:
                 indicators["origin_history"] = {"error": "Could not fetch history"}
 
+            # Step 5: ASPA validation on unique AS paths (if available)
+            aspa_indicators = {"checked": 0, "valid": 0, "invalid": 0, "unknown": 0}
+            if self._aspa_validator:
+                try:
+                    seen_paths: set[tuple[int, ...]] = set()
+                    for route in routes:
+                        if route.as_path:
+                            path_tuple = tuple(route.as_path)
+                            if path_tuple not in seen_paths and len(seen_paths) < 5:
+                                seen_paths.add(path_tuple)
+                                aspa_result = await self._aspa_validator.validate_path(
+                                    list(path_tuple)
+                                )
+                                aspa_indicators["checked"] += 1
+                                aspa_indicators[aspa_result.state.value] += 1
+                                if aspa_result.state.value == "invalid":
+                                    risk_factors.append("ASPA Invalid: route leak detected in AS path")
+                except Exception:
+                    pass
+
+            indicators["aspa"] = aspa_indicators
+
             # Calculate risk level
             if any("RPKI Invalid" in rf for rf in risk_factors):
                 risk_level = "high"
@@ -1927,6 +1949,18 @@ class BGPTools:
                         )
                 else:
                     summary.append("**Origin History:** Stable (no changes in last 7 days)")
+                summary.append("")
+
+            # ASPA section
+            aspa = indicators["aspa"]
+            if aspa["checked"] > 0:
+                summary.append(
+                    f"**ASPA Path Validation:** {aspa['checked']} paths checked "
+                    f"({aspa['valid']} valid, {aspa['invalid']} invalid, "
+                    f"{aspa['unknown']} unknown)"
+                )
+                if aspa["invalid"] > 0:
+                    summary.append("  ⚠️ ASPA violations detected — possible route leak")
                 summary.append("")
 
             # Risk factors summary

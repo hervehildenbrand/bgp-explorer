@@ -1,6 +1,6 @@
 """Tests for ASPA validation module."""
 
-from unittest.mock import AsyncMock, PropertyMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -12,7 +12,6 @@ from bgp_explorer.analysis.aspa_validation import (
 )
 from bgp_explorer.models.as_relationship import ASRelationship
 from bgp_explorer.models.aspa import ASPAState
-
 
 # ---------------------------------------------------------------------------
 # Helpers
