@@ -29,6 +29,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
+from bgp_explorer.analysis.aspa_validation import ASPAValidator, create_aspa_validator
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
 from bgp_explorer.sources.globalping import GlobalpingClient
@@ -68,6 +69,7 @@ _peeringdb: PeeringDBClient | None = None
 _path_analyzer: PathAnalyzer | None = None
 _as_analyzer: ASAnalyzer | None = None
 _resilience_assessor: ResilienceAssessor | None = None
+_aspa_validator: ASPAValidator | None = None
 
 
 async def get_ripe_stat() -> RipeStatClient:
@@ -130,6 +132,15 @@ def get_resilience_assessor() -> ResilienceAssessor:
     if _resilience_assessor is None:
         _resilience_assessor = ResilienceAssessor()
     return _resilience_assessor
+
+
+async def get_aspa_validator() -> ASPAValidator | None:
+    """Get or create ASPAValidator (lazy initialization)."""
+    global _aspa_validator
+    if _aspa_validator is None:
+        monocle = await get_monocle()
+        _aspa_validator = create_aspa_validator(monocle=monocle)
+    return _aspa_validator
 
 
 # =============================================================================
@@ -1832,6 +1843,96 @@ async def assess_network_resilience(
 
     except Exception as e:
         return f"Error assessing network resilience for AS{asn}: {e}"
+
+
+# =============================================================================
+# ASPA Validation Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def verify_aspa_path(
+    as_path: Annotated[
+        str,
+        Field(
+            description="Comma-separated AS path to validate (e.g., '13335,174,15169'). "
+            "Order: origin AS first, collector-side AS last."
+        ),
+    ],
+) -> str:
+    """Verify ASPA (AS Provider Authorization) for a BGP AS path.
+
+    Checks whether each hop in the path represents an authorized
+    customer-provider relationship, and whether the path follows
+    valley-free routing (no route leaks).
+
+    This complements RPKI ROA validation: ROA checks origin authorization,
+    ASPA checks path authorization (route leak detection).
+
+    Uses Monocle AS relationship data as a proxy for ASPA objects.
+
+    Requires the monocle binary to be installed.
+    """
+    validator = await get_aspa_validator()
+    if validator is None:
+        return (
+            "ASPA validation requires Monocle for AS relationship data. "
+            "Install with: cargo install monocle"
+        )
+
+    try:
+        asns = []
+        for part in as_path.split(","):
+            part = part.strip()
+            if part:
+                asns.append(int(part))
+
+        if not asns:
+            return "Please provide a valid AS path (e.g., '13335,174,15169')."
+
+        result = await validator.validate_path(asns)
+
+        path_str = " -> ".join(f"AS{asn}" for asn in result.as_path)
+        state_emoji = {
+            "valid": "VALID", "invalid": "INVALID",
+            "unknown": "UNKNOWN", "unverifiable": "UNVERIFIABLE",
+        }.get(result.state.value, "ERROR")
+
+        summary = [
+            f"**ASPA Path Verification: {path_str}**",
+            "",
+            f"**State:** {state_emoji}",
+            f"**Valley-free:** {'Yes' if result.valley_free else 'No (possible route leak)'}",
+            "",
+        ]
+
+        if result.hop_results:
+            summary.append("**Per-hop analysis:**")
+            for hop in result.hop_results:
+                auth_str = {
+                    True: "authorized",
+                    False: "not authorized",
+                    None: "unknown",
+                }[hop.is_authorized_provider]
+                summary.append(
+                    f"  - AS{hop.asn} -> AS{hop.next_asn}: "
+                    f"{auth_str} ({hop.relationship_type})"
+                )
+            summary.append("")
+
+        if result.issues:
+            summary.append("**Issues:**")
+            for issue in result.issues:
+                summary.append(f"  - {issue}")
+        else:
+            summary.append("**No issues detected.** Path authorization looks good.")
+
+        return "\n".join(summary)
+
+    except ValueError:
+        return "Invalid AS path format. Use comma-separated ASNs (e.g., '13335,174,15169')."
+    except Exception as e:
+        return f"Error verifying ASPA path: {e}"
 
 
 # =============================================================================
