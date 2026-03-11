@@ -4,6 +4,7 @@ Provides tools to analyze BGP update activity and detect route instability,
 including flapping detection and stability scoring.
 """
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -76,7 +77,7 @@ class StabilityAnalyzer:
         total_announcements = 0
         total_withdrawals = 0
 
-        for bucket in activity_data.get("activity", []):
+        for bucket in activity_data.get("updates", []):
             total_announcements += bucket.get("announcements", 0)
             total_withdrawals += bucket.get("withdrawals", 0)
 
@@ -230,10 +231,10 @@ class StabilityAnalyzer:
             excess = withdrawal_ratio - 0.3
             score -= min(2.0, excess * 4.0)
 
-        # Deduct for flaps
+        # Deduct for flaps (logarithmic scaling)
         if flap_count > 0:
-            # Each flap costs 0.2 points, max 4 points deduction
-            score -= min(4.0, flap_count * 0.2)
+            # log10(10)=1 → 1.0pt, log10(100)=2 → 2.0pt, log10(10000)=4 → 4.0pt
+            score -= min(4.0, math.log10(max(flap_count, 1)) * 1.0)
 
         # Ensure score stays in valid range
         return max(0.0, min(10.0, score))

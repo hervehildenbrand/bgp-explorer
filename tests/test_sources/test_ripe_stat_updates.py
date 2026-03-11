@@ -104,7 +104,7 @@ class TestRipeStatUpdates:
                 "resource": "8.8.8.0/24",
                 "sampling_period": 3600,
                 "nr_samples": 24,
-                "activity": [
+                "updates": [
                     {
                         "starttime": "2024-01-01T00:00:00",
                         "endtime": "2024-01-01T01:00:00",
@@ -138,9 +138,9 @@ class TestRipeStatUpdates:
 
             assert data["resource"] == "8.8.8.0/24"
             assert data["sampling_period"] == 3600
-            assert len(data["activity"]) == 2
-            assert data["activity"][0]["announcements"] == 5
-            assert data["activity"][0]["withdrawals"] == 2
+            assert len(data["updates"]) == 2
+            assert data["updates"][0]["announcements"] == 5
+            assert data["updates"][0]["withdrawals"] == 2
 
     @pytest.mark.asyncio
     async def test_get_bgp_updates_success(self, client):

@@ -2428,7 +2428,7 @@ async def get_bgp_update_activity(
             min_sampling_period=sampling_hours * 3600,
         )
 
-        activity = data.get("activity", [])
+        activity = data.get("updates", [])
         if not activity:
             return f"No update activity found for {resource} in the specified period."
 

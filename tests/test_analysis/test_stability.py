@@ -42,7 +42,7 @@ class TestStabilityAnalyzer:
         # Simulate activity data with very few updates
         activity_data = {
             "resource": "8.8.8.0/24",
-            "activity": [
+            "updates": [
                 {
                     "starttime": "2024-01-01T00:00:00",
                     "endtime": "2024-01-01T01:00:00",
@@ -74,7 +74,7 @@ class TestStabilityAnalyzer:
         # Simulate activity data with many updates (flapping)
         activity_data = {
             "resource": "10.0.0.0/24",
-            "activity": [
+            "updates": [
                 {
                     "starttime": "2024-01-01T00:00:00",
                     "endtime": "2024-01-01T01:00:00",
@@ -105,7 +105,7 @@ class TestStabilityAnalyzer:
         # Simulate moderate activity (not stable, not flapping)
         activity_data = {
             "resource": "192.168.0.0/24",
-            "activity": [
+            "updates": [
                 {
                     "starttime": "2024-01-01T00:00:00",
                     "endtime": "2024-01-01T12:00:00",
@@ -219,7 +219,7 @@ class TestStabilityAnalyzer:
         # Create activity data with zero updates
         activity_data = {
             "resource": "8.8.8.0/24",
-            "activity": [
+            "updates": [
                 {
                     "starttime": "2024-01-01T00:00:00",
                     "endtime": "2024-01-01T01:00:00",
@@ -266,7 +266,7 @@ class TestStabilityAnalyzer:
         """Test that high flap count alone can trigger is_flapping."""
         activity_data = {
             "resource": "8.8.8.0/24",
-            "activity": [
+            "updates": [
                 {
                     "starttime": "2024-01-01T00:00:00",
                     "endtime": "2024-01-01T12:00:00",
