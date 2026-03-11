@@ -12,6 +12,8 @@ from bgp_explorer.analysis.as_analysis import ASAnalyzer
 from bgp_explorer.analysis.aspa_validation import create_aspa_validator
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
+from bgp_explorer.analysis.rov_coverage import ROVCoverageAnalyzer
+from bgp_explorer.analysis.stability import StabilityAnalyzer
 from bgp_explorer.models.event import EventType
 from bgp_explorer.sources.bgp_radar import BgpRadarClient
 from bgp_explorer.sources.globalping import GlobalpingClient
@@ -49,6 +51,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "assess_network_resilience": "Assessing network resilience for AS{asn}...",
     "verify_aspa_path": "Verifying ASPA authorization for path {as_path}...",
     "get_whois_data": "Looking up WHOIS/IRR data for {resource}...",
+    "query_looking_glass": "Querying looking glass for {prefix}...",
+    "get_prefix_stability": "Analyzing stability for {prefix}...",
+    "get_bgp_update_activity": "Getting update activity for {resource}...",
+    "analyze_rov_coverage": "Analyzing ROV coverage for {prefix}...",
 }
 
 
@@ -106,6 +112,8 @@ class BGPTools:
         self._as_analyzer = ASAnalyzer()
         self._resilience_assessor = ResilienceAssessor()
         self._aspa_validator = create_aspa_validator(monocle=monocle)
+        self._stability_analyzer = StabilityAnalyzer()
+        self._rov_coverage_analyzer = ROVCoverageAnalyzer()
 
     def get_all_tools(self) -> list[Callable[..., Any]]:
         """Get all tool functions for registration with AI backend.
@@ -127,6 +135,10 @@ class BGPTools:
             self.get_asn_details,
             self.check_prefix_anomalies,
             self.get_whois_data,
+            self.query_looking_glass,
+            self.get_prefix_stability,
+            self.get_bgp_update_activity,
+            self.analyze_rov_coverage,
         ]
         # Add bgp-radar monitoring tools if available
         if self._bgp_radar:
@@ -2326,3 +2338,287 @@ class BGPTools:
 
         except Exception as e:
             return f"Error assessing network resilience for AS{asn}: {str(e)}"
+
+    async def query_looking_glass(
+        self,
+        prefix: str,
+        vantage_point: str | None = None,
+        source: str = "ripe_ris",
+    ) -> str:
+        """Query BGP tables from specific vantage points.
+
+        Shows how a prefix is seen from RIPE RIS collectors — the AS paths,
+        communities, and peer details for each collector seeing the prefix.
+
+        Use this to:
+        - See how a prefix is routed from different parts of the Internet
+        - Compare routing across collectors
+        - Debug routing differences between vantage points
+
+        Args:
+            prefix: IP prefix in CIDR notation (e.g., "8.8.8.0/24").
+            vantage_point: Optional RRC collector filter (e.g., "rrc00" or "rrc00,rrc01").
+            source: Data source — currently only "ripe_ris" is supported.
+
+        Returns:
+            Per-collector routing information with AS paths and communities.
+        """
+        try:
+            data = await self._ripe_stat.get_looking_glass(
+                prefix, collector=vantage_point
+            )
+
+            rrcs = data.get("rrcs", [])
+            if not rrcs:
+                return f"No looking glass data found for {prefix}."
+
+            summary = [f"**Looking Glass: {prefix}**", ""]
+
+            for rrc in rrcs:
+                rrc_name = rrc.get("rrc", "unknown")
+                location = rrc.get("location", "")
+                peers = rrc.get("peers", [])
+
+                header = f"**{rrc_name}**"
+                if location:
+                    header += f" ({location})"
+                header += f" — {len(peers)} peers"
+                summary.append(header)
+
+                for peer in peers[:5]:
+                    asn = peer.get("asn_origin", peer.get("asn", ""))
+                    as_path = peer.get("as_path", "")
+                    community = peer.get("community", "")
+                    line = f"  - AS{asn}"
+                    if as_path:
+                        line += f" | path: {as_path}"
+                    if community:
+                        line += f" | comm: {community}"
+                    summary.append(line)
+
+                if len(peers) > 5:
+                    summary.append(f"  ... and {len(peers) - 5} more peers")
+                summary.append("")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error querying looking glass for {prefix}: {str(e)}"
+
+    async def get_prefix_stability(
+        self,
+        prefix: str,
+        start_date: str,
+        end_date: str,
+    ) -> str:
+        """Analyze BGP stability for a prefix over a time period.
+
+        Shows update frequency, flap detection, withdrawal ratio, and a
+        stability score (0-10). Use this to identify unstable prefixes that
+        may be experiencing routing issues.
+
+        Args:
+            prefix: IP prefix in CIDR notation (e.g., "1.1.1.0/24").
+            start_date: Start date in YYYY-MM-DD format (e.g., "2025-01-01").
+            end_date: End date in YYYY-MM-DD format (e.g., "2025-01-31").
+
+        Returns:
+            Stability report with update counts, flap detection, and score.
+        """
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=UTC)
+            end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=UTC)
+
+            # Get update activity data
+            activity_data = await self._ripe_stat.get_bgp_update_activity(
+                prefix, start, end
+            )
+
+            # Try to detect flaps from raw updates (shorter window for detail)
+            flap_count = 0
+            try:
+                updates_data = await self._ripe_stat.get_bgp_updates(
+                    prefix, start, end
+                )
+                flaps = self._stability_analyzer.detect_flaps(updates_data)
+                flap_count = len(flaps)
+            except Exception:
+                pass  # Flap detection is optional
+
+            # Analyze stability
+            report = self._stability_analyzer.analyze_update_activity(
+                prefix, activity_data, flap_count=flap_count
+            )
+
+            # Format report
+            if report.stability_score >= 8:
+                score_label = "Excellent"
+            elif report.stability_score >= 6:
+                score_label = "Good"
+            elif report.stability_score >= 4:
+                score_label = "Fair"
+            else:
+                score_label = "Poor"
+
+            summary = [
+                f"**BGP Stability Report: {prefix}**",
+                f"**Period:** {report.period_start} to {report.period_end}",
+                "",
+                f"**Stability Score:** {report.stability_score:.1f}/10 ({score_label})",
+                "",
+                f"**Updates:** {report.total_updates:,} total "
+                f"({report.announcements:,} announcements, "
+                f"{report.withdrawals:,} withdrawals)",
+                f"**Updates/Day:** {report.updates_per_day:.1f}",
+                f"**Withdrawal Ratio:** {report.withdrawal_ratio:.1%}",
+                f"**Flaps Detected:** {report.flap_count}",
+                "",
+            ]
+
+            if report.is_flapping:
+                summary.append(
+                    "**Status: FLAPPING** — This prefix is experiencing "
+                    "significant route instability."
+                )
+            elif report.is_stable:
+                summary.append(
+                    "**Status: STABLE** — This prefix has minimal route changes."
+                )
+            else:
+                summary.append(
+                    "**Status: MODERATE** — Some route activity detected, "
+                    "but within normal range."
+                )
+
+            return "\n".join(summary)
+
+        except ValueError:
+            return "Invalid date format. Use YYYY-MM-DD (e.g., '2025-01-01')."
+        except Exception as e:
+            return f"Error analyzing stability for {prefix}: {str(e)}"
+
+    async def get_bgp_update_activity(
+        self,
+        resource: str,
+        start_date: str,
+        end_date: str,
+        sampling_hours: int = 1,
+    ) -> str:
+        """Get raw BGP update activity time series for a resource.
+
+        Returns time-bucketed announcement and withdrawal counts. Use this
+        for understanding update patterns over time.
+
+        Args:
+            resource: IP prefix or ASN (e.g., "8.8.8.0/24" or "AS15169").
+            start_date: Start date in YYYY-MM-DD format.
+            end_date: End date in YYYY-MM-DD format.
+            sampling_hours: Bucket size in hours (default 1).
+
+        Returns:
+            Time-bucketed update counts.
+        """
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=UTC)
+            end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=UTC)
+
+            data = await self._ripe_stat.get_bgp_update_activity(
+                resource, start, end,
+                min_sampling_period=sampling_hours * 3600,
+            )
+
+            activity = data.get("activity", [])
+            if not activity:
+                return f"No update activity found for {resource} in the specified period."
+
+            summary = [
+                f"**BGP Update Activity: {resource}**",
+                f"**Period:** {start_date} to {end_date}",
+                f"**Bucket size:** {sampling_hours}h",
+                "",
+            ]
+
+            total_a = 0
+            total_w = 0
+            for bucket in activity:
+                a = bucket.get("announcements", 0)
+                w = bucket.get("withdrawals", 0)
+                total_a += a
+                total_w += w
+                ts = bucket.get("starttime", "")
+                if a > 0 or w > 0:
+                    summary.append(f"  {ts}: {a} announcements, {w} withdrawals")
+
+            summary.append("")
+            summary.append(
+                f"**Totals:** {total_a} announcements, {total_w} withdrawals "
+                f"({total_a + total_w} total)"
+            )
+
+            return "\n".join(summary)
+
+        except ValueError:
+            return "Invalid date format. Use YYYY-MM-DD (e.g., '2025-01-01')."
+        except Exception as e:
+            return f"Error getting update activity for {resource}: {str(e)}"
+
+    async def analyze_rov_coverage(self, prefix: str) -> str:
+        """Analyze RPKI ROV deployment coverage for a prefix.
+
+        Estimates what percentage of Internet paths to a prefix traverse
+        networks that enforce ROV (Route Origin Validation). Higher coverage
+        means better protection against BGP hijacks.
+
+        Use this to:
+        - Assess how well-protected a prefix is against RPKI-invalid hijacks
+        - Identify which ROV-enforcing networks are in the routing paths
+        - Understand the protection level (high/medium/low)
+
+        Args:
+            prefix: IP prefix in CIDR notation (e.g., "185.199.108.0/22").
+
+        Returns:
+            ROV coverage analysis with protection level and enforcer details.
+        """
+        try:
+            # Get all current AS paths for the prefix
+            routes = await self._ripe_stat.get_bgp_state(prefix)
+
+            if not routes:
+                return f"No routes found for {prefix}. Cannot analyze ROV coverage."
+
+            # Analyze coverage
+            report = self._rov_coverage_analyzer.analyze_prefix_coverage(
+                prefix, routes
+            )
+
+            # Format report
+            summary = [
+                f"**ROV Coverage Analysis: {prefix}**",
+                "",
+                f"**Protection Level:** {report.protection_level.upper()}",
+                f"**Path Coverage:** {report.path_coverage:.0%} "
+                f"({report.paths_with_rov_enforcer}/{report.total_paths} paths)",
+                f"**Tier-1 Coverage:** {report.tier1_coverage:.0%}",
+                "",
+                report.summary,
+                "",
+            ]
+
+            if report.rov_enforcers_in_paths:
+                summary.append("**ROV Enforcers in Paths:**")
+                for enforcer in report.rov_enforcers_in_paths[:10]:
+                    cat = enforcer["category"].upper()
+                    summary.append(
+                        f"  - AS{enforcer['asn']} ({enforcer['name']}) "
+                        f"[{cat}] — in {enforcer['path_count']} paths"
+                    )
+                if len(report.rov_enforcers_in_paths) > 10:
+                    summary.append(
+                        f"  ... and {len(report.rov_enforcers_in_paths) - 10} more"
+                    )
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error analyzing ROV coverage for {prefix}: {str(e)}"
