@@ -303,3 +303,82 @@ class RipeStatClient(DataSource):
         """
         data = await self._request("as-overview", {"resource": f"AS{asn}"})
         return data
+
+    async def get_looking_glass(
+        self,
+        prefix: str,
+        collector: str | None = None,
+    ) -> dict[str, Any]:
+        """Get looking glass data for a prefix.
+
+        Shows per-collector routing info including AS paths, communities,
+        and peer details from RIPE RIS collectors.
+
+        Args:
+            prefix: IP prefix in CIDR notation.
+            collector: Optional comma-separated RRC filter (e.g., "rrc00,rrc01").
+
+        Returns:
+            Dictionary with per-collector routing information.
+        """
+        params: dict[str, Any] = {"resource": prefix}
+        if collector:
+            params["rrcs"] = collector
+        data = await self._request("looking-glass", params)
+        return data
+
+    async def get_bgp_update_activity(
+        self,
+        resource: str,
+        start: datetime,
+        end: datetime,
+        min_sampling_period: int = 3600,
+    ) -> dict[str, Any]:
+        """Get BGP update activity with time-bucketed counts.
+
+        Provides announcement/withdrawal counts aggregated into time buckets.
+
+        Args:
+            resource: IP prefix or ASN.
+            start: Start time for query.
+            end: End time for query.
+            min_sampling_period: Minimum bucket size in seconds (default 3600).
+
+        Returns:
+            Dictionary with time-bucketed update activity data.
+        """
+        params = {
+            "resource": resource,
+            "starttime": start.strftime("%Y-%m-%dT%H:%M:%S"),
+            "endtime": end.strftime("%Y-%m-%dT%H:%M:%S"),
+            "min_sampling_period": min_sampling_period,
+        }
+        data = await self._request("bgp-update-activity", params)
+        return data
+
+    async def get_bgp_updates(
+        self,
+        resource: str,
+        start: datetime,
+        end: datetime,
+    ) -> dict[str, Any]:
+        """Get BGP updates stream for a resource.
+
+        Returns individual BGP update events (announcements/withdrawals)
+        with full details including AS paths and communities.
+
+        Args:
+            resource: IP prefix or ASN.
+            start: Start time for query.
+            end: End time for query.
+
+        Returns:
+            Dictionary with update stream (type A/W, AS path, communities).
+        """
+        params = {
+            "resource": resource,
+            "starttime": start.strftime("%Y-%m-%dT%H:%M:%S"),
+            "endtime": end.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        data = await self._request("bgp-updates", params)
+        return data
