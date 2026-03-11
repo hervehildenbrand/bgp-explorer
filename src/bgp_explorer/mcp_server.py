@@ -58,6 +58,7 @@ Key guidelines:
 - For peer counts, use get_as_peers (NOT path analysis metrics)
 - For connectivity overview, use get_as_connectivity_summary
 - For hijack detection, use check_prefix_anomalies
+- For WHOIS/IRR data (route objects, aut-num, abuse contacts), use get_whois_data
 """,
 )
 
@@ -619,7 +620,8 @@ async def get_rpki_status(
     """
     try:
         client = await get_ripe_stat()
-        status = await client.get_rpki_validation(prefix, origin_asn)
+        detail = await client.get_rpki_validation_detail(prefix, origin_asn)
+        status = detail["status"]
 
         status_label = {
             "valid": "VALID",
@@ -648,6 +650,25 @@ async def get_rpki_status(
         else:
             summary.append("No ROA found for this prefix. The origin cannot be validated via RPKI.")
 
+        # Add ROA details if available
+        roas = detail.get("validating_roas", [])
+        if roas:
+            summary.append("")
+            summary.append("**ROA Details:**")
+            prefix_len = int(prefix.split("/")[1]) if "/" in prefix else 0
+            for roa in roas:
+                max_len = roa.get("max_length", prefix_len)
+                summary.append(
+                    f"  - ROA prefix: {roa.get('prefix', prefix)}, "
+                    f"maxLength: /{max_len}, origin: AS{roa.get('origin', '?')}"
+                )
+                if max_len > prefix_len:
+                    summary.append(
+                        f"  - Sub-prefix exposure: prefixes up to /{max_len} can be announced"
+                    )
+                else:
+                    summary.append("  - Sub-prefix exposure: NONE (maxLength matches announcement)")
+
         return "\n".join(summary)
 
     except Exception as e:
@@ -661,8 +682,8 @@ async def check_rpki_for_asn(
     """Check RPKI validation status for ALL prefixes announced by an ASN.
 
     Bulk RPKI check: fetches all announced prefixes for the ASN, validates
-    each against RPKI, and returns an aggregated summary with counts of
-    valid/invalid/not-found prefixes. Any INVALID prefixes are listed explicitly.
+    each against RPKI, and returns an aggregated summary with per-prefix
+    breakdown showing ROA details for each prefix.
 
     Use this for network audits instead of checking prefixes one by one.
 
@@ -679,18 +700,22 @@ async def check_rpki_for_asn(
 
         # Validate all prefixes with concurrency limit
         semaphore = asyncio.Semaphore(10)
-        results: dict[str, list[str]] = {"valid": [], "invalid": [], "not-found": []}
+        results: dict[str, list[dict]] = {"valid": [], "invalid": [], "not-found": []}
 
         async def check_one(prefix: str) -> None:
             async with semaphore:
                 try:
-                    status = await client.get_rpki_validation(prefix, asn)
-                    if status.startswith("invalid"):
-                        status = "invalid"
+                    detail = await client.get_rpki_validation_detail(prefix, asn)
+                    status = detail["status"]
                     bucket = status if status in results else "not-found"
-                    results[bucket].append(prefix)
+                    results[bucket].append(detail)
                 except Exception:
-                    results["not-found"].append(prefix)
+                    results["not-found"].append({
+                        "status": "not-found",
+                        "prefix": prefix,
+                        "origin_asn": asn,
+                        "validating_roas": [],
+                    })
 
         await asyncio.gather(*(check_one(p) for p in prefixes))
 
@@ -704,10 +729,32 @@ async def check_rpki_for_asn(
             "",
         ]
 
+        if results["valid"]:
+            summary.append("**VALID prefixes:**")
+            for detail in results["valid"]:
+                roas = detail.get("validating_roas", [])
+                if roas:
+                    max_len = roas[0].get("max_length", "?")
+                    summary.append(f"  - {detail['prefix']} (ROA maxLength: /{max_len})")
+                else:
+                    summary.append(f"  - {detail['prefix']}")
+            summary.append("")
+
         if results["invalid"]:
             summary.append("**INVALID prefixes (potential hijack or misconfiguration):**")
-            for p in results["invalid"]:
-                summary.append(f"  - {p}")
+            for detail in results["invalid"]:
+                roas = detail.get("validating_roas", [])
+                if roas:
+                    roa_origin = roas[0].get("origin", "?")
+                    summary.append(f"  - {detail['prefix']} (ROA origin: AS{roa_origin})")
+                else:
+                    summary.append(f"  - {detail['prefix']}")
+            summary.append("")
+
+        if results["not-found"]:
+            summary.append("**NOT FOUND prefixes (no ROA):**")
+            for detail in results["not-found"]:
+                summary.append(f"  - {detail['prefix']}")
             summary.append("")
 
         coverage = len(results["valid"]) + len(results["invalid"])
@@ -2096,6 +2143,69 @@ async def verify_aspa_path(
         return "Invalid AS path format. Use comma-separated ASNs (e.g., '13335,174,15169')."
     except Exception as e:
         return f"Error verifying ASPA path: {e}"
+
+
+@mcp.tool()
+async def get_whois_data(
+    resource: Annotated[
+        str,
+        Field(description="ASN (e.g., 'AS15169') or IP prefix (e.g., '193.0.0.0/21') to look up"),
+    ],
+) -> str:
+    """Get WHOIS and IRR data for an ASN or IP prefix.
+
+    Returns registration details, IRR route objects, and abuse contacts.
+    Use this to verify route objects, check aut-num policies, or find abuse contacts.
+
+    Data source: RIPE Stat WHOIS API.
+    """
+    if not resource or not resource.strip():
+        return "Please provide a non-empty resource (ASN like 'AS15169' or prefix like '193.0.0.0/21')."
+
+    try:
+        client = await get_ripe_stat()
+        data = await client.get_whois_data(resource.strip())
+
+        records = data.get("records", [])
+        irr_records = data.get("irr_records", [])
+        authorities = data.get("authorities", [])
+
+        summary = [f"**WHOIS Data for {resource.strip()}**", ""]
+
+        if authorities:
+            summary.append(f"**Registry:** {', '.join(a.upper() for a in authorities)}")
+            summary.append("")
+
+        # Parse registration records
+        if records:
+            summary.append("**Registration:**")
+            for record_group in records:
+                for entry in record_group:
+                    key = entry.get("key", "")
+                    value = entry.get("value", "")
+                    if key and value:
+                        summary.append(f"  - {key}: {value}")
+            summary.append("")
+
+        # Parse IRR records
+        if irr_records:
+            summary.append(f"**IRR Route Objects ({len(irr_records)}):**")
+            for i, record_group in enumerate(irr_records, 1):
+                parts = []
+                for entry in record_group:
+                    key = entry.get("key", "")
+                    value = entry.get("value", "")
+                    if key and value:
+                        parts.append(f"{key}: {value}")
+                if parts:
+                    summary.append(f"  {i}. {' | '.join(parts)}")
+        else:
+            summary.append("**IRR Records:** No IRR route objects found")
+
+        return "\n".join(summary)
+
+    except Exception as e:
+        return f"Error getting WHOIS data: {e}"
 
 
 # =============================================================================

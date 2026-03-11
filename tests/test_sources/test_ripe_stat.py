@@ -192,6 +192,166 @@ class TestRipeStatClient:
             assert status == "invalid"
 
     @pytest.mark.asyncio
+    async def test_get_rpki_validation_detail_valid(self, client):
+        """Test RPKI validation detail returns ROA fields."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "resource": "15169",
+                "prefix": "8.8.8.0/24",
+                "validating_roas": [
+                    {
+                        "origin": "15169",
+                        "prefix": "8.8.8.0/24",
+                        "max_length": 24,
+                        "validity": "valid",
+                    }
+                ],
+                "status": "valid",
+            },
+        }
+
+        with aioresponses() as m:
+            m.get(
+                "https://stat.ripe.net/data/rpki-validation/data.json?resource=15169&prefix=8.8.8.0/24",
+                payload=mock_response,
+            )
+
+            async with client:
+                result = await client.get_rpki_validation_detail("8.8.8.0/24", 15169)
+
+            assert result["status"] == "valid"
+            assert result["prefix"] == "8.8.8.0/24"
+            assert result["origin_asn"] == 15169
+            assert len(result["validating_roas"]) == 1
+            assert result["validating_roas"][0]["max_length"] == 24
+            assert result["validating_roas"][0]["origin"] == "15169"
+
+    @pytest.mark.asyncio
+    async def test_get_rpki_validation_detail_not_found(self, client):
+        """Test RPKI validation detail with no ROAs."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "resource": "64496",
+                "prefix": "10.0.0.0/8",
+                "validating_roas": [],
+                "status": "not-found",
+            },
+        }
+
+        with aioresponses() as m:
+            m.get(
+                "https://stat.ripe.net/data/rpki-validation/data.json?resource=64496&prefix=10.0.0.0/8",
+                payload=mock_response,
+            )
+
+            async with client:
+                result = await client.get_rpki_validation_detail("10.0.0.0/8", 64496)
+
+            assert result["status"] == "not-found"
+            assert result["validating_roas"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_rpki_validation_detail_invalid_normalizes(self, client):
+        """Test RPKI validation detail normalizes invalid_asn to invalid."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "resource": "64496",
+                "prefix": "1.2.3.0/24",
+                "validating_roas": [
+                    {
+                        "origin": "15169",
+                        "prefix": "1.2.3.0/24",
+                        "max_length": 24,
+                        "validity": "invalid_asn",
+                    }
+                ],
+                "status": "invalid_asn",
+            },
+        }
+
+        with aioresponses() as m:
+            m.get(
+                "https://stat.ripe.net/data/rpki-validation/data.json?resource=64496&prefix=1.2.3.0/24",
+                payload=mock_response,
+            )
+
+            async with client:
+                result = await client.get_rpki_validation_detail("1.2.3.0/24", 64496)
+
+            assert result["status"] == "invalid"
+            assert len(result["validating_roas"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_whois_data_asn(self, client):
+        """Test WHOIS data retrieval for an ASN."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "records": [
+                    [
+                        {"key": "ASNumber", "value": "15169"},
+                        {"key": "ASName", "value": "GOOGLE"},
+                        {"key": "OrgName", "value": "Google LLC"},
+                    ]
+                ],
+                "irr_records": [],
+                "authorities": ["arin"],
+            },
+        }
+
+        with aioresponses() as m:
+            m.get(
+                "https://stat.ripe.net/data/whois/data.json?resource=AS15169",
+                payload=mock_response,
+            )
+
+            async with client:
+                result = await client.get_whois_data("AS15169")
+
+            assert len(result["records"]) == 1
+            assert result["irr_records"] == []
+            assert result["authorities"] == ["arin"]
+
+    @pytest.mark.asyncio
+    async def test_get_whois_data_prefix(self, client):
+        """Test WHOIS data retrieval for a prefix."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "records": [
+                    [
+                        {"key": "inetnum", "value": "193.0.0.0 - 193.0.7.255"},
+                        {"key": "netname", "value": "RIPE-NCC"},
+                    ]
+                ],
+                "irr_records": [
+                    [
+                        {"key": "route", "value": "193.0.0.0/21"},
+                        {"key": "origin", "value": "AS3333"},
+                        {"key": "source", "value": "RIPE"},
+                    ]
+                ],
+                "authorities": ["ripe"],
+            },
+        }
+
+        with aioresponses() as m:
+            m.get(
+                "https://stat.ripe.net/data/whois/data.json?resource=193.0.0.0/21",
+                payload=mock_response,
+            )
+
+            async with client:
+                result = await client.get_whois_data("193.0.0.0/21")
+
+            assert len(result["records"]) == 1
+            assert len(result["irr_records"]) == 1
+            assert result["authorities"] == ["ripe"]
+
+    @pytest.mark.asyncio
     async def test_get_routing_history(self, client):
         """Test getting routing history for a resource."""
         mock_response = {

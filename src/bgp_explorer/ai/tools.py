@@ -48,6 +48,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "check_prefix_anomalies": "Checking {prefix} for hijack indicators...",
     "assess_network_resilience": "Assessing network resilience for AS{asn}...",
     "verify_aspa_path": "Verifying ASPA authorization for path {as_path}...",
+    "get_whois_data": "Looking up WHOIS/IRR data for {resource}...",
 }
 
 
@@ -125,6 +126,7 @@ class BGPTools:
             self.compare_collectors,
             self.get_asn_details,
             self.check_prefix_anomalies,
+            self.get_whois_data,
         ]
         # Add bgp-radar monitoring tools if available
         if self._bgp_radar:
@@ -701,13 +703,14 @@ class BGPTools:
             origin_asn: The AS number claiming to originate the prefix.
 
         Returns:
-            RPKI validation status:
+            RPKI validation status with ROA details:
             - valid: ROA exists and matches - legitimate announcement
             - invalid: ROA exists but DOESN'T match - potential hijack!
             - not-found: No ROA - owner hasn't deployed RPKI (common, not necessarily bad)
         """
         try:
-            status = await self._ripe_stat.get_rpki_validation(prefix, origin_asn)
+            detail = await self._ripe_stat.get_rpki_validation_detail(prefix, origin_asn)
+            status = detail["status"]
 
             status_emoji = {
                 "valid": "✅",
@@ -737,6 +740,25 @@ class BGPTools:
                     "No ROA found for this prefix. The origin cannot be validated via RPKI."
                 )
 
+            # Add ROA details if available
+            roas = detail.get("validating_roas", [])
+            if roas:
+                summary.append("")
+                summary.append("**ROA Details:**")
+                prefix_len = int(prefix.split("/")[1]) if "/" in prefix else 0
+                for roa in roas:
+                    max_len = roa.get("max_length", prefix_len)
+                    summary.append(
+                        f"  - ROA prefix: {roa.get('prefix', prefix)}, "
+                        f"maxLength: /{max_len}, origin: AS{roa.get('origin', '?')}"
+                    )
+                    if max_len > prefix_len:
+                        summary.append(
+                            f"  - Sub-prefix exposure: prefixes up to /{max_len} can be announced"
+                        )
+                    else:
+                        summary.append("  - Sub-prefix exposure: NONE (maxLength matches announcement)")
+
             return "\n".join(summary)
 
         except Exception as e:
@@ -746,8 +768,8 @@ class BGPTools:
         """Check RPKI validation status for ALL prefixes announced by an ASN.
 
         Bulk RPKI check: fetches all announced prefixes for the ASN, validates
-        each against RPKI, and returns an aggregated summary with counts of
-        valid/invalid/not-found prefixes. Any INVALID prefixes are listed explicitly.
+        each against RPKI, and returns an aggregated summary with per-prefix
+        breakdown showing ROA details for each prefix.
 
         Use this for network audits instead of checking prefixes one by one.
 
@@ -755,8 +777,7 @@ class BGPTools:
             asn: Autonomous System Number (e.g., 15169 for Google).
 
         Returns:
-            Aggregated RPKI status for all prefixes: valid/invalid/not-found counts
-            plus a list of any INVALID prefixes.
+            Aggregated RPKI status with per-prefix breakdown and ROA details.
         """
         import asyncio
 
@@ -768,18 +789,22 @@ class BGPTools:
 
             # Validate all prefixes with concurrency limit
             semaphore = asyncio.Semaphore(10)
-            results: dict[str, list[str]] = {"valid": [], "invalid": [], "not-found": []}
+            results: dict[str, list[dict]] = {"valid": [], "invalid": [], "not-found": []}
 
             async def check_one(prefix: str) -> None:
                 async with semaphore:
                     try:
-                        status = await self._ripe_stat.get_rpki_validation(prefix, asn)
-                        if status.startswith("invalid"):
-                            status = "invalid"
+                        detail = await self._ripe_stat.get_rpki_validation_detail(prefix, asn)
+                        status = detail["status"]
                         bucket = status if status in results else "not-found"
-                        results[bucket].append(prefix)
+                        results[bucket].append(detail)
                     except Exception:
-                        results["not-found"].append(prefix)
+                        results["not-found"].append({
+                            "status": "not-found",
+                            "prefix": prefix,
+                            "origin_asn": asn,
+                            "validating_roas": [],
+                        })
 
             await asyncio.gather(*(check_one(p) for p in prefixes))
 
@@ -793,10 +818,32 @@ class BGPTools:
                 "",
             ]
 
+            if results["valid"]:
+                summary.append("**VALID prefixes:**")
+                for detail in results["valid"]:
+                    roas = detail.get("validating_roas", [])
+                    if roas:
+                        max_len = roas[0].get("max_length", "?")
+                        summary.append(f"  - {detail['prefix']} (ROA maxLength: /{max_len})")
+                    else:
+                        summary.append(f"  - {detail['prefix']}")
+                summary.append("")
+
             if results["invalid"]:
                 summary.append("**INVALID prefixes (potential hijack or misconfiguration):**")
-                for p in results["invalid"]:
-                    summary.append(f"  - {p}")
+                for detail in results["invalid"]:
+                    roas = detail.get("validating_roas", [])
+                    if roas:
+                        roa_origin = roas[0].get("origin", "?")
+                        summary.append(f"  - {detail['prefix']} (ROA origin: AS{roa_origin})")
+                    else:
+                        summary.append(f"  - {detail['prefix']}")
+                summary.append("")
+
+            if results["not-found"]:
+                summary.append("**NOT FOUND prefixes (no ROA):**")
+                for detail in results["not-found"]:
+                    summary.append(f"  - {detail['prefix']}")
                 summary.append("")
 
             coverage = len(results["valid"]) + len(results["invalid"])
@@ -807,6 +854,63 @@ class BGPTools:
 
         except Exception as e:
             return f"Error checking RPKI for AS{asn}: {str(e)}"
+
+    async def get_whois_data(self, resource: str) -> str:
+        """Get WHOIS and IRR data for an ASN or IP prefix.
+
+        Returns registration details, IRR route objects, and abuse contacts.
+        Use this to verify route objects, check aut-num policies, or find abuse contacts.
+
+        Args:
+            resource: ASN (e.g., 'AS15169') or prefix (e.g., '193.0.0.0/21').
+
+        Returns:
+            Formatted WHOIS/IRR data for the resource.
+        """
+        if not resource or not resource.strip():
+            return "Please provide a non-empty resource (ASN like 'AS15169' or prefix like '193.0.0.0/21')."
+
+        try:
+            data = await self._ripe_stat.get_whois_data(resource.strip())
+
+            records = data.get("records", [])
+            irr_records = data.get("irr_records", [])
+            authorities = data.get("authorities", [])
+
+            summary = [f"**WHOIS Data for {resource.strip()}**", ""]
+
+            if authorities:
+                summary.append(f"**Registry:** {', '.join(a.upper() for a in authorities)}")
+                summary.append("")
+
+            if records:
+                summary.append("**Registration:**")
+                for record_group in records:
+                    for entry in record_group:
+                        key = entry.get("key", "")
+                        value = entry.get("value", "")
+                        if key and value:
+                            summary.append(f"  - {key}: {value}")
+                summary.append("")
+
+            if irr_records:
+                summary.append(f"**IRR Route Objects ({len(irr_records)}):**")
+                for i, record_group in enumerate(irr_records, 1):
+                    parts = []
+                    for entry in record_group:
+                        key = entry.get("key", "")
+                        value = entry.get("value", "")
+                        if key and value:
+                            parts.append(f"{key}: {value}")
+                    if parts:
+                        summary.append(f"  {i}. {' | '.join(parts)}")
+            else:
+                summary.append("**IRR Records:** No IRR route objects found")
+
+            return "\n".join(summary)
+
+        except Exception as e:
+            return f"Error getting WHOIS data: {str(e)}"
 
     async def analyze_as_path(self, prefix: str) -> str:
         """Analyze AS path diversity and characteristics for a prefix.

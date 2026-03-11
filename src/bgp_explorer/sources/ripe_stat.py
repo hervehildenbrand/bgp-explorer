@@ -159,6 +159,42 @@ class RipeStatClient(DataSource):
             return "invalid"
         return status
 
+    async def get_rpki_validation_detail(self, prefix: str, origin_asn: int) -> dict[str, Any]:
+        """Get full RPKI validation with ROA details.
+
+        Args:
+            prefix: IP prefix in CIDR notation.
+            origin_asn: Origin AS number.
+
+        Returns:
+            Dictionary with status, validating_roas, prefix, and origin_asn.
+        """
+        data = await self._request(
+            "rpki-validation",
+            {"resource": origin_asn, "prefix": prefix},
+        )
+        status = data.get("status", "not-found")
+        if status.startswith("invalid"):
+            status = "invalid"
+        return {
+            "status": status,
+            "validating_roas": data.get("validating_roas", []),
+            "prefix": prefix,
+            "origin_asn": origin_asn,
+        }
+
+    async def get_whois_data(self, resource: str) -> dict[str, Any]:
+        """Get WHOIS and IRR data for a resource (ASN or prefix).
+
+        Args:
+            resource: ASN (e.g., "AS15169") or prefix (e.g., "193.0.0.0/21").
+
+        Returns:
+            Dictionary with records, irr_records, and authorities.
+        """
+        data = await self._request("whois", {"resource": resource})
+        return data
+
     async def get_routing_history(
         self,
         resource: str,

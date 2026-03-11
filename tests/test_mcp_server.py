@@ -15,7 +15,16 @@ class TestGetRpkiStatus:
     async def test_rpki_valid_shows_valid_not_ok(self):
         """Test that RPKI valid status shows 'VALID' not 'OK' for consistency."""
         mock_client = AsyncMock()
-        mock_client.get_rpki_validation = AsyncMock(return_value="valid")
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "valid",
+                "prefix": "8.8.8.0/24",
+                "origin_asn": 15169,
+                "validating_roas": [
+                    {"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}
+                ],
+            }
+        )
 
         with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
             result = await mcp_server.get_rpki_status("8.8.8.0/24", 15169)
@@ -230,6 +239,244 @@ class TestGlobalpingBogonDetection:
         assert "bogon" not in result.lower()
 
 
+class TestRpkiStatusRoaDetails:
+    """Tests for get_rpki_status ROA detail output."""
+
+    @pytest.mark.asyncio
+    async def test_rpki_valid_shows_roa_details(self):
+        """Test that RPKI valid status shows ROA maxLength details."""
+        mock_client = AsyncMock()
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "valid",
+                "prefix": "8.8.8.0/24",
+                "origin_asn": 15169,
+                "validating_roas": [
+                    {
+                        "origin": "15169",
+                        "prefix": "8.8.8.0/24",
+                        "max_length": 24,
+                        "validity": "valid",
+                    }
+                ],
+            }
+        )
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.get_rpki_status("8.8.8.0/24", 15169)
+
+        assert "VALID" in result
+        assert "ROA" in result
+        assert "maxLength" in result or "max_length" in result or "/24" in result
+
+    @pytest.mark.asyncio
+    async def test_rpki_valid_shows_subprefix_exposure_warning(self):
+        """Test that ROA with maxLength > prefix shows sub-prefix exposure warning."""
+        mock_client = AsyncMock()
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "valid",
+                "prefix": "192.0.2.0/21",
+                "origin_asn": 64496,
+                "validating_roas": [
+                    {
+                        "origin": "64496",
+                        "prefix": "192.0.2.0/21",
+                        "max_length": 24,
+                        "validity": "valid",
+                    }
+                ],
+            }
+        )
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.get_rpki_status("192.0.2.0/21", 64496)
+
+        assert "sub-prefix" in result.lower() or "Sub-prefix" in result
+
+    @pytest.mark.asyncio
+    async def test_rpki_not_found_no_roa_section(self):
+        """Test that not-found status shows no ROA details section."""
+        mock_client = AsyncMock()
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "not-found",
+                "prefix": "10.0.0.0/8",
+                "origin_asn": 64496,
+                "validating_roas": [],
+            }
+        )
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.get_rpki_status("10.0.0.0/8", 64496)
+
+        assert "NOT FOUND" in result
+        assert "No ROA found" in result
+
+
+class TestCheckRpkiForAsnPerPrefix:
+    """Tests for check_rpki_for_asn per-prefix breakdown."""
+
+    @pytest.mark.asyncio
+    async def test_shows_all_prefix_groups(self):
+        """Test that all three status groups (valid/invalid/not-found) list prefixes."""
+        mock_client = AsyncMock()
+        mock_client.get_announced_prefixes = AsyncMock(
+            return_value=["8.8.8.0/24", "8.8.4.0/24", "1.2.3.0/24", "10.0.0.0/8"]
+        )
+
+        async def mock_detail(prefix, origin_asn):
+            mapping = {
+                "8.8.8.0/24": {
+                    "status": "valid",
+                    "prefix": "8.8.8.0/24",
+                    "origin_asn": origin_asn,
+                    "validating_roas": [{"origin": str(origin_asn), "prefix": "8.8.8.0/24", "max_length": 24}],
+                },
+                "8.8.4.0/24": {
+                    "status": "valid",
+                    "prefix": "8.8.4.0/24",
+                    "origin_asn": origin_asn,
+                    "validating_roas": [{"origin": str(origin_asn), "prefix": "8.8.4.0/24", "max_length": 24}],
+                },
+                "1.2.3.0/24": {
+                    "status": "invalid",
+                    "prefix": "1.2.3.0/24",
+                    "origin_asn": origin_asn,
+                    "validating_roas": [{"origin": "99999", "prefix": "1.2.3.0/24", "max_length": 24}],
+                },
+                "10.0.0.0/8": {
+                    "status": "not-found",
+                    "prefix": "10.0.0.0/8",
+                    "origin_asn": origin_asn,
+                    "validating_roas": [],
+                },
+            }
+            return mapping[prefix]
+
+        mock_client.get_rpki_validation_detail = AsyncMock(side_effect=mock_detail)
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.check_rpki_for_asn(15169)
+
+        # All three sections should exist
+        assert "**VALID prefixes" in result
+        assert "**INVALID prefixes" in result
+        assert "**NOT FOUND prefixes" in result
+        # Specific prefixes should appear in the right sections
+        assert "8.8.8.0/24" in result
+        assert "1.2.3.0/24" in result
+        assert "10.0.0.0/8" in result
+        # ROA maxLength should be shown for valid prefixes
+        assert "/24" in result
+
+    @pytest.mark.asyncio
+    async def test_shows_roa_maxlength_per_prefix(self):
+        """Test that valid prefixes show ROA maxLength."""
+        mock_client = AsyncMock()
+        mock_client.get_announced_prefixes = AsyncMock(return_value=["8.8.8.0/24"])
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "valid",
+                "prefix": "8.8.8.0/24",
+                "origin_asn": 15169,
+                "validating_roas": [{"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}],
+            }
+        )
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.check_rpki_for_asn(15169)
+
+        assert "maxLength" in result or "max_length" in result or "ROA" in result
+
+
+class TestGetWhoisData:
+    """Tests for get_whois_data MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_whois_asn_shows_registration(self):
+        """Test WHOIS for ASN shows registration info."""
+        mock_client = AsyncMock()
+        mock_client.get_whois_data = AsyncMock(
+            return_value={
+                "records": [
+                    [
+                        {"key": "ASNumber", "value": "15169"},
+                        {"key": "ASName", "value": "GOOGLE"},
+                        {"key": "OrgName", "value": "Google LLC"},
+                        {"key": "Country", "value": "US"},
+                    ]
+                ],
+                "irr_records": [],
+                "authorities": ["arin"],
+            }
+        )
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.get_whois_data("AS15169")
+
+        assert "GOOGLE" in result
+        assert "Google LLC" in result or "15169" in result
+        assert "arin" in result.lower() or "ARIN" in result
+
+    @pytest.mark.asyncio
+    async def test_whois_prefix_shows_irr_records(self):
+        """Test WHOIS for prefix shows IRR route objects."""
+        mock_client = AsyncMock()
+        mock_client.get_whois_data = AsyncMock(
+            return_value={
+                "records": [
+                    [
+                        {"key": "inetnum", "value": "193.0.0.0 - 193.0.7.255"},
+                        {"key": "netname", "value": "RIPE-NCC"},
+                    ]
+                ],
+                "irr_records": [
+                    [
+                        {"key": "route", "value": "193.0.0.0/21"},
+                        {"key": "origin", "value": "AS3333"},
+                        {"key": "source", "value": "RIPE"},
+                        {"key": "mnt-by", "value": "RIPE-NCC-MNT"},
+                    ]
+                ],
+                "authorities": ["ripe"],
+            }
+        )
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.get_whois_data("193.0.0.0/21")
+
+        assert "193.0.0.0/21" in result
+        assert "AS3333" in result
+        assert "RIPE" in result
+        assert "IRR" in result
+
+    @pytest.mark.asyncio
+    async def test_whois_empty_irr_records(self):
+        """Test WHOIS with no IRR records shows none found."""
+        mock_client = AsyncMock()
+        mock_client.get_whois_data = AsyncMock(
+            return_value={
+                "records": [
+                    [{"key": "ASNumber", "value": "64496"}, {"key": "ASName", "value": "EXAMPLE"}]
+                ],
+                "irr_records": [],
+                "authorities": ["arin"],
+            }
+        )
+
+        with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
+            result = await mcp_server.get_whois_data("AS64496")
+
+        assert "none" in result.lower() or "no IRR" in result.lower() or "No IRR" in result
+
+    @pytest.mark.asyncio
+    async def test_whois_empty_resource_rejected(self):
+        """Test that empty resource is rejected."""
+        result = await mcp_server.get_whois_data("")
+        assert "provide" in result.lower() or "non-empty" in result.lower()
+
+
 class TestRpkiStatusNotFound:
     """P2: get_rpki_status should show NOT FOUND not UNKNOWN for missing ROAs."""
 
@@ -237,7 +484,14 @@ class TestRpkiStatusNotFound:
     async def test_rpki_not_found_shows_not_found_label(self):
         """When RIPE returns 'not-found', display should say NOT FOUND not UNKNOWN."""
         mock_client = AsyncMock()
-        mock_client.get_rpki_validation = AsyncMock(return_value="not-found")
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "not-found",
+                "prefix": "192.0.2.0/24",
+                "origin_asn": 1,
+                "validating_roas": [],
+            }
+        )
 
         with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
             result = await mcp_server.get_rpki_status("192.0.2.0/24", 1)
@@ -249,7 +503,14 @@ class TestRpkiStatusNotFound:
     async def test_rpki_unknown_status_shows_not_found(self):
         """When RIPE returns 'unknown' (e.g. for bogon prefixes), show NOT FOUND."""
         mock_client = AsyncMock()
-        mock_client.get_rpki_validation = AsyncMock(return_value="unknown")
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "unknown",
+                "prefix": "192.0.2.0/24",
+                "origin_asn": 1,
+                "validating_roas": [],
+            }
+        )
 
         with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
             result = await mcp_server.get_rpki_status("192.0.2.0/24", 1)
@@ -261,7 +522,14 @@ class TestRpkiStatusNotFound:
     async def test_rpki_unexpected_status_shows_unknown(self):
         """Truly unexpected status values should show UNKNOWN."""
         mock_client = AsyncMock()
-        mock_client.get_rpki_validation = AsyncMock(return_value="something-unexpected")
+        mock_client.get_rpki_validation_detail = AsyncMock(
+            return_value={
+                "status": "something-unexpected",
+                "prefix": "8.8.8.0/24",
+                "origin_asn": 15169,
+                "validating_roas": [],
+            }
+        )
 
         with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
             result = await mcp_server.get_rpki_status("8.8.8.0/24", 15169)

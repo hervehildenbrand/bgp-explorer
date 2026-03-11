@@ -158,13 +158,116 @@ class TestBGPTools:
 
     @pytest.mark.asyncio
     async def test_get_rpki_status(self, tools, mock_ripe_stat):
-        """Test getting RPKI validation status."""
-        mock_ripe_stat.get_rpki_validation.return_value = "valid"
+        """Test getting RPKI validation status with ROA details."""
+        mock_ripe_stat.get_rpki_validation_detail.return_value = {
+            "status": "valid",
+            "prefix": "8.8.8.0/24",
+            "origin_asn": 15169,
+            "validating_roas": [
+                {"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}
+            ],
+        }
 
         result = await tools.get_rpki_status("8.8.8.0/24", 15169)
 
         assert "valid" in result.lower()
-        mock_ripe_stat.get_rpki_validation.assert_called_once_with("8.8.8.0/24", 15169)
+        assert "ROA" in result
+        mock_ripe_stat.get_rpki_validation_detail.assert_called_once_with("8.8.8.0/24", 15169)
+
+    @pytest.mark.asyncio
+    async def test_get_rpki_status_subprefix_exposure(self, tools, mock_ripe_stat):
+        """Test RPKI status shows sub-prefix exposure warning."""
+        mock_ripe_stat.get_rpki_validation_detail.return_value = {
+            "status": "valid",
+            "prefix": "192.0.2.0/21",
+            "origin_asn": 64496,
+            "validating_roas": [
+                {"origin": "64496", "prefix": "192.0.2.0/21", "max_length": 24}
+            ],
+        }
+
+        result = await tools.get_rpki_status("192.0.2.0/21", 64496)
+
+        assert "sub-prefix" in result.lower() or "Sub-prefix" in result
+
+    @pytest.mark.asyncio
+    async def test_check_rpki_for_asn_per_prefix(self, tools, mock_ripe_stat):
+        """Test check_rpki_for_asn shows per-prefix breakdown."""
+        mock_ripe_stat.get_announced_prefixes.return_value = [
+            "8.8.8.0/24", "10.0.0.0/8"
+        ]
+
+        async def mock_detail(prefix, asn):
+            if prefix == "8.8.8.0/24":
+                return {
+                    "status": "valid",
+                    "prefix": "8.8.8.0/24",
+                    "origin_asn": asn,
+                    "validating_roas": [{"origin": str(asn), "prefix": "8.8.8.0/24", "max_length": 24}],
+                }
+            return {
+                "status": "not-found",
+                "prefix": "10.0.0.0/8",
+                "origin_asn": asn,
+                "validating_roas": [],
+            }
+
+        mock_ripe_stat.get_rpki_validation_detail.side_effect = mock_detail
+
+        result = await tools.check_rpki_for_asn(15169)
+
+        assert "**VALID prefixes" in result
+        assert "**NOT FOUND prefixes" in result
+        assert "8.8.8.0/24" in result
+        assert "10.0.0.0/8" in result
+
+    @pytest.mark.asyncio
+    async def test_get_whois_data_asn(self, tools, mock_ripe_stat):
+        """Test WHOIS data retrieval for ASN."""
+        mock_ripe_stat.get_whois_data.return_value = {
+            "records": [
+                [
+                    {"key": "ASNumber", "value": "15169"},
+                    {"key": "ASName", "value": "GOOGLE"},
+                ]
+            ],
+            "irr_records": [],
+            "authorities": ["arin"],
+        }
+
+        result = await tools.get_whois_data("AS15169")
+
+        assert "GOOGLE" in result
+        assert "15169" in result
+
+    @pytest.mark.asyncio
+    async def test_get_whois_data_prefix_with_irr(self, tools, mock_ripe_stat):
+        """Test WHOIS data for prefix with IRR records."""
+        mock_ripe_stat.get_whois_data.return_value = {
+            "records": [
+                [{"key": "inetnum", "value": "193.0.0.0 - 193.0.7.255"}]
+            ],
+            "irr_records": [
+                [
+                    {"key": "route", "value": "193.0.0.0/21"},
+                    {"key": "origin", "value": "AS3333"},
+                    {"key": "source", "value": "RIPE"},
+                ]
+            ],
+            "authorities": ["ripe"],
+        }
+
+        result = await tools.get_whois_data("193.0.0.0/21")
+
+        assert "AS3333" in result
+        assert "IRR" in result
+
+    @pytest.mark.asyncio
+    async def test_get_whois_data_empty_resource(self, tools, mock_ripe_stat):
+        """Test WHOIS data with empty resource rejected."""
+        result = await tools.get_whois_data("")
+
+        assert "provide" in result.lower() or "non-empty" in result.lower()
 
     def test_get_all_tools(self, tools):
         """Test getting all tool functions."""
