@@ -197,6 +197,13 @@ class ASPAValidator:
             confidence=confidence,
         )
 
+    # Well-known Tier-1 transit-free ASNs whose inter-provider peering is
+    # expected and should not trigger valley-free violations.
+    TIER1_ASNS: set[int] = {
+        174, 209, 286, 701, 1239, 1299, 2914, 3257, 3320, 3356,
+        5511, 6453, 6461, 6762, 6830, 7018, 12956,
+    }
+
     @staticmethod
     def _check_valley_free(hop_results: list[ASPAHopResult]) -> bool:
         """Check if the path follows valley-free routing.
@@ -204,6 +211,10 @@ class ASPAValidator:
         Valley-free: the path goes uphill (customer->provider), optionally
         through a peer link, then downhill (provider->customer). A valley
         occurs when the path goes downhill then back uphill.
+
+        Peer-or-lateral hops between two Tier-1 ASNs are treated as neutral
+        (they don't set went_down) because Tier-1 inter-provider peering is
+        normal and expected.
         """
         if not hop_results:
             return True
@@ -220,8 +231,12 @@ class ASPAValidator:
             elif hop.relationship_type == "downstream":
                 went_down = True
             elif hop.relationship_type == "peer-or-lateral":
-                # Peer link: after this, should only go down
-                went_down = True
+                # Tier-1 inter-provider peering is expected — treat as neutral
+                if hop.asn in ASPAValidator.TIER1_ASNS and hop.next_asn in ASPAValidator.TIER1_ASNS:
+                    pass  # Don't set went_down for Tier-1 peering
+                else:
+                    # Regular peer link: after this, should only go down
+                    went_down = True
             # "unknown" hops don't change direction tracking
 
         return True

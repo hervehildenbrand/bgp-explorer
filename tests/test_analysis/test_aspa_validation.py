@@ -191,6 +191,81 @@ class TestASPAValidator:
         """Empty hop list is valley-free."""
         assert ASPAValidator._check_valley_free([]) is True
 
+    def test_check_valley_free_tier1_peering_neutral(self):
+        """Tier-1 inter-provider peering should NOT trigger valley violation."""
+        from bgp_explorer.models.aspa import ASPAHopResult
+
+        # Path: customer -> Tier-1 A (peer) Tier-1 B -> customer
+        # The peer hop between two Tier-1s should be neutral
+        hops = [
+            ASPAHopResult(
+                asn=65000, next_asn=3356, is_authorized_provider=True,
+                relationship_type="upstream", data_source="fake", confidence=0.7,
+            ),
+            ASPAHopResult(
+                asn=3356, next_asn=1299, is_authorized_provider=False,
+                relationship_type="peer-or-lateral", data_source="fake", confidence=0.7,
+            ),
+            ASPAHopResult(
+                asn=1299, next_asn=65001, is_authorized_provider=False,
+                relationship_type="downstream", data_source="fake", confidence=0.7,
+            ),
+        ]
+        # With Tier-1 peering treated as neutral, the uphill->peer->downhill is valid
+        assert ASPAValidator._check_valley_free(hops) is True
+
+    def test_check_valley_free_non_tier1_peering_sets_went_down(self):
+        """Non-Tier-1 peering should still trigger valley violation if followed by upstream."""
+        from bgp_explorer.models.aspa import ASPAHopResult
+
+        hops = [
+            ASPAHopResult(
+                asn=65000, next_asn=65001, is_authorized_provider=False,
+                relationship_type="peer-or-lateral", data_source="fake", confidence=0.7,
+            ),
+            ASPAHopResult(
+                asn=65001, next_asn=65002, is_authorized_provider=True,
+                relationship_type="upstream", data_source="fake", confidence=0.7,
+            ),
+        ]
+        # Non-Tier-1 peer sets went_down, so upstream after that is a valley
+        assert ASPAValidator._check_valley_free(hops) is False
+
+    def test_check_valley_free_tier1_peering_then_upstream_ok(self):
+        """After Tier-1 peering (neutral), upstream should still be allowed."""
+        from bgp_explorer.models.aspa import ASPAHopResult
+
+        hops = [
+            ASPAHopResult(
+                asn=3356, next_asn=2914, is_authorized_provider=False,
+                relationship_type="peer-or-lateral", data_source="fake", confidence=0.7,
+            ),
+            ASPAHopResult(
+                asn=2914, next_asn=65000, is_authorized_provider=False,
+                relationship_type="downstream", data_source="fake", confidence=0.7,
+            ),
+        ]
+        # Tier-1 peering is neutral, downstream after is fine
+        assert ASPAValidator._check_valley_free(hops) is True
+
+    @pytest.mark.asyncio
+    async def test_tier1_peering_path_not_invalid(self):
+        """Full path through Tier-1 peering should not be marked INVALID."""
+        # Path: 65000 -> 3356 (Tier-1) -> 1299 (Tier-1) -> 65001
+        # 65000 has 3356 as provider, 65001 has 1299 as provider
+        # 3356 and 1299 are peers (neither is provider of the other)
+        provider = FakeASPAProvider({
+            65000: [3356],
+            3356: [],      # Tier-1, no upstream
+            1299: [],      # Tier-1, no upstream
+            65001: [1299],
+        })
+        validator = ASPAValidator(provider)
+        result = await validator.validate_path([65000, 3356, 1299, 65001])
+
+        # The 3356->1299 hop is peer-or-lateral between Tier-1s, treated as neutral
+        assert result.valley_free is True
+
 
 # ---------------------------------------------------------------------------
 # TestMonocleASPAProvider
