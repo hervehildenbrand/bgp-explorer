@@ -337,6 +337,13 @@ async def get_asn_announcements(
             default=None,
         ),
     ] = None,
+    full_list: Annotated[
+        bool,
+        Field(
+            description="When True, return ALL prefixes without truncation. Use for audits.",
+            default=False,
+        ),
+    ] = False,
 ) -> str:
     """Get prefixes announced by an AS, optionally filtered by address family.
 
@@ -346,6 +353,8 @@ async def get_asn_announcements(
 
     Use address_family filter when the user specifically asks about one protocol
     (e.g., "show only IPv6 prefixes").
+
+    Set full_list=True to return all prefixes without truncation (useful for audits).
 
     Data source: RIPE Stat announced-prefixes API.
     """
@@ -381,27 +390,40 @@ async def get_asn_announcements(
 
         if filtered_prefixes is not None:
             # Filtered view - show only requested family
-            summary.append(f"**{family_label} prefixes (filtered):**")
-            for p in filtered_prefixes[:15]:
-                summary.append(f"  - {p}")
-            if len(filtered_prefixes) > 15:
-                summary.append(f"  ... and {len(filtered_prefixes) - 15} more")
+            label = f"**{family_label} prefixes (filtered):**"
+            summary.append(label)
+            if full_list:
+                for p in filtered_prefixes:
+                    summary.append(f"  - {p}")
+            else:
+                for p in filtered_prefixes[:15]:
+                    summary.append(f"  - {p}")
+                if len(filtered_prefixes) > 15:
+                    summary.append(f"  ... and {len(filtered_prefixes) - 15} more")
         else:
             # Default view - show both families
             if ipv4:
-                summary.append("**IPv4 prefixes (sample):**")
-                for p in ipv4[:10]:
-                    summary.append(f"  - {p}")
-                if len(ipv4) > 10:
-                    summary.append(f"  ... and {len(ipv4) - 10} more")
+                summary.append("**IPv4 prefixes:**" if full_list else "**IPv4 prefixes (sample):**")
+                if full_list:
+                    for p in ipv4:
+                        summary.append(f"  - {p}")
+                else:
+                    for p in ipv4[:10]:
+                        summary.append(f"  - {p}")
+                    if len(ipv4) > 10:
+                        summary.append(f"  ... and {len(ipv4) - 10} more")
                 summary.append("")
 
             if ipv6:
-                summary.append("**IPv6 prefixes (sample):**")
-                for p in ipv6[:5]:
-                    summary.append(f"  - {p}")
-                if len(ipv6) > 5:
-                    summary.append(f"  ... and {len(ipv6) - 5} more")
+                summary.append("**IPv6 prefixes:**" if full_list else "**IPv6 prefixes (sample):**")
+                if full_list:
+                    for p in ipv6:
+                        summary.append(f"  - {p}")
+                else:
+                    for p in ipv6[:5]:
+                        summary.append(f"  - {p}")
+                    if len(ipv6) > 5:
+                        summary.append(f"  ... and {len(ipv6) - 5} more")
 
         return "\n".join(summary)
 
@@ -630,6 +652,72 @@ async def get_rpki_status(
 
     except Exception as e:
         return f"Error checking RPKI status: {e}"
+
+
+@mcp.tool()
+async def check_rpki_for_asn(
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
+) -> str:
+    """Check RPKI validation status for ALL prefixes announced by an ASN.
+
+    Bulk RPKI check: fetches all announced prefixes for the ASN, validates
+    each against RPKI, and returns an aggregated summary with counts of
+    valid/invalid/not-found prefixes. Any INVALID prefixes are listed explicitly.
+
+    Use this for network audits instead of checking prefixes one by one.
+
+    Data source: RIPE Stat announced-prefixes + rpki-validation APIs.
+    """
+    import asyncio
+
+    try:
+        client = await get_ripe_stat()
+        prefixes = await client.get_announced_prefixes(asn)
+
+        if not prefixes:
+            return f"AS{asn} is not announcing any prefixes, or the ASN does not exist."
+
+        # Validate all prefixes with concurrency limit
+        semaphore = asyncio.Semaphore(10)
+        results: dict[str, list[str]] = {"valid": [], "invalid": [], "not-found": []}
+
+        async def check_one(prefix: str) -> None:
+            async with semaphore:
+                try:
+                    status = await client.get_rpki_validation(prefix, asn)
+                    if status.startswith("invalid"):
+                        status = "invalid"
+                    bucket = status if status in results else "not-found"
+                    results[bucket].append(prefix)
+                except Exception:
+                    results["not-found"].append(prefix)
+
+        await asyncio.gather(*(check_one(p) for p in prefixes))
+
+        summary = [
+            f"**AS{asn} RPKI Validation Summary**",
+            "",
+            f"**Total prefixes checked:** {len(prefixes)}",
+            f"  - VALID: {len(results['valid'])}",
+            f"  - INVALID: {len(results['invalid'])}",
+            f"  - NOT FOUND (no ROA): {len(results['not-found'])}",
+            "",
+        ]
+
+        if results["invalid"]:
+            summary.append("**INVALID prefixes (potential hijack or misconfiguration):**")
+            for p in results["invalid"]:
+                summary.append(f"  - {p}")
+            summary.append("")
+
+        coverage = len(results["valid"]) + len(results["invalid"])
+        coverage_pct = (coverage / len(prefixes) * 100) if prefixes else 0
+        summary.append(f"**RPKI coverage:** {coverage_pct:.1f}% ({coverage}/{len(prefixes)} prefixes have ROAs)")
+
+        return "\n".join(summary)
+
+    except Exception as e:
+        return f"Error checking RPKI for AS{asn}: {e}"
 
 
 @mcp.tool()
@@ -951,6 +1039,7 @@ async def check_prefix_anomalies(
         if validator:
             try:
                 seen_paths: set[tuple[int, ...]] = set()
+                has_non_tier1_invalid = False
                 for route in routes:
                     if route.as_path:
                         path_tuple = tuple(route.as_path)
@@ -960,7 +1049,21 @@ async def check_prefix_anomalies(
                             aspa_indicators["checked"] += 1
                             aspa_indicators[aspa_result.state.value] += 1
                             if aspa_result.state.value == "invalid":
-                                risk_factors.append("ASPA Invalid: route leak detected in AS path")
+                                # Check if invalidity involves only Tier-1 peering hops
+                                tier1_only = all(
+                                    h.asn in ASPAValidator.TIER1_ASNS
+                                    and h.next_asn in ASPAValidator.TIER1_ASNS
+                                    for h in aspa_result.hop_results
+                                    if h.relationship_type == "peer-or-lateral"
+                                )
+                                if not tier1_only:
+                                    has_non_tier1_invalid = True
+                if has_non_tier1_invalid:
+                    risk_factors.append("ASPA Invalid: route leak detected in AS path")
+                if aspa_indicators["invalid"] > 0 and not has_non_tier1_invalid:
+                    aspa_indicators["note"] = (
+                        "ASPA invalid results involve Tier-1 peering hops which are expected"
+                    )
             except Exception:
                 pass
 
@@ -1105,6 +1208,28 @@ async def get_as_upstreams(
                     f"No data found for AS{asn}. "
                     f"This ASN may not exist or may have no visible routes in global BGP data."
                 )
+
+            # Fallback: use connectivity data which has its own classification
+            try:
+                connectivity = await monocle.get_connectivity(asn)
+                if connectivity.upstreams and len(connectivity.upstreams) > 0:
+                    summary = [
+                        f"**AS{asn} Upstream Providers** (from connectivity data)",
+                        "",
+                        f"**Total upstreams:** {len(connectivity.upstreams)}",
+                        "",
+                    ]
+                    for upstream in connectivity.upstreams:
+                        name_str = f" {upstream.name}" if upstream.name else ""
+                        summary.append(
+                            f"  - AS{upstream.asn}{name_str} ({upstream.peers_percent:.1f}% visibility)"
+                        )
+                    summary.append("")
+                    summary.append("_Note: Data from connectivity analysis (relationship classification may differ from as2rel)._")
+                    return "\n".join(summary)
+            except Exception:
+                pass
+
             return f"No upstream providers found for AS{asn}. This AS may be a transit-free network (Tier 1)."
 
         summary = [
@@ -1693,9 +1818,14 @@ async def get_network_contacts(
     try:
         network = peeringdb.get_network_info(asn)
         contacts = peeringdb.get_network_contacts(asn)
+    except RuntimeError as e:
+        return f"Error retrieving PeeringDB data for AS{asn}: {e}"
+    except Exception as e:
+        return f"Error retrieving PeeringDB data for AS{asn}: {e}"
 
+    try:
         if not network:
-            return f"AS{asn} not found in PeeringDB."
+            return f"AS{asn} not found in PeeringDB. The ASN may not be registered or may not participate in PeeringDB."
 
         summary = [
             f"**AS{asn} Contact Information**",
@@ -1704,7 +1834,7 @@ async def get_network_contacts(
         ]
 
         if not contacts:
-            summary.append("No public contact information available in PeeringDB.")
+            summary.append(f"No public contact information published for AS{asn} in PeeringDB.")
             if network.website:
                 summary.append(f"\n**Website:** {network.website}")
             return "\n".join(summary)
