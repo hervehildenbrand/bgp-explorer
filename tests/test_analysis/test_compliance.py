@@ -5,8 +5,8 @@ import json
 import pytest
 
 from bgp_explorer.analysis.compliance import (
-    ComplianceAuditReport,
     ComplianceAuditor,
+    ComplianceAuditReport,
     ComplianceCategoryReport,
     ComplianceFinding,
     ComplianceFramework,
@@ -16,7 +16,6 @@ from bgp_explorer.analysis.compliance import (
 from bgp_explorer.analysis.resilience import ResilienceReport
 from bgp_explorer.analysis.rov_coverage import ROVCoverageReport
 from bgp_explorer.analysis.stability import StabilityReport
-
 
 # --- Helpers ---
 

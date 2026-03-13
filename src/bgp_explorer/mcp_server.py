@@ -30,6 +30,7 @@ from pydantic import Field
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
 from bgp_explorer.analysis.aspa_validation import ASPAValidator, create_aspa_validator
+from bgp_explorer.analysis.compliance import ComplianceAuditor
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
 from bgp_explorer.analysis.rov_coverage import ROVCoverageAnalyzer
@@ -78,6 +79,7 @@ _resilience_assessor: ResilienceAssessor | None = None
 _aspa_validator: ASPAValidator | None = None
 _stability_analyzer: StabilityAnalyzer | None = None
 _rov_coverage_analyzer: ROVCoverageAnalyzer | None = None
+_compliance_auditor: ComplianceAuditor | None = None
 
 
 def get_stability_analyzer() -> StabilityAnalyzer:
@@ -94,6 +96,14 @@ def get_rov_coverage_analyzer() -> ROVCoverageAnalyzer:
     if _rov_coverage_analyzer is None:
         _rov_coverage_analyzer = ROVCoverageAnalyzer()
     return _rov_coverage_analyzer
+
+
+def get_compliance_auditor() -> ComplianceAuditor:
+    """Get or create ComplianceAuditor."""
+    global _compliance_auditor
+    if _compliance_auditor is None:
+        _compliance_auditor = ComplianceAuditor()
+    return _compliance_auditor
 
 
 async def get_ripe_stat() -> RipeStatClient:
@@ -2523,6 +2533,184 @@ async def analyze_rov_coverage(
 
     except Exception as e:
         return f"Error analyzing ROV coverage for {prefix}: {e}"
+
+
+# =============================================================================
+# Compliance Auditing
+# =============================================================================
+
+
+@mcp.tool()
+async def run_compliance_audit(
+    asn: Annotated[int, Field(description="Autonomous System Number to audit (e.g., 15169 for Google)")],
+    framework: Annotated[
+        str,
+        Field(description="Compliance framework: 'dora', 'nis2', or 'both' (default: 'both')"),
+    ] = "both",
+    output_format: Annotated[
+        str,
+        Field(description="Output format: 'text' or 'json' (default: 'text')"),
+    ] = "text",
+) -> str:
+    """Run a DORA and/or NIS 2 compliance audit on a network's BGP routing.
+
+    Maps BGP analysis results to EU regulatory requirements:
+    - DORA (2022/2554): ICT risk management for financial entities
+    - NIS 2 (2022/2555): Cybersecurity for critical infrastructure operators
+
+    Checks include:
+    - Transit concentration risk (single point of failure)
+    - Network resilience scoring
+    - RPKI/ROV deployment coverage
+    - Route stability and flapping
+    - Third-party provider concentration
+    - Business continuity (geographic diversity via IXPs)
+    - Incident detection capability
+
+    Scoring: 0-100, where >=80 is COMPLIANT, >=50 is PARTIAL, <50 is NON_COMPLIANT.
+
+    Requires: monocle binary and PeeringDB data (same as assess_network_resilience).
+    """
+    monocle = await get_monocle()
+    if monocle is None:
+        return (
+            "Monocle is not configured. Compliance audit requires "
+            "Monocle for AS relationship data. Install with: cargo install monocle"
+        )
+
+    peeringdb = await get_peeringdb()
+    if peeringdb is None:
+        return (
+            "PeeringDB is not configured. Compliance audit requires "
+            "PeeringDB for IXP presence data."
+        )
+
+    try:
+        # --- Gather resilience data (required) ---
+        assessor = get_resilience_assessor()
+
+        upstreams = await monocle.get_as_upstreams(asn)
+        peers = await monocle.get_as_peers(asn)
+        downstreams = await monocle.get_as_downstreams(asn)
+        ixps = peeringdb.get_ixps_for_asn(asn)
+
+        peering_score, peer_count = assessor._score_peering(peers)
+        transit_score, transit_issues = assessor._score_transit(
+            upstreams, peer_count=peer_count, downstream_count=len(downstreams)
+        )
+        ixp_score, ixp_names = assessor._score_ixp(ixps)
+        path_redundancy_score = transit_score
+        ddos_provider = assessor._detect_ddos_provider(upstreams)
+        single_transit = len(upstreams) == 1
+
+        scores = {
+            "transit": transit_score,
+            "peering": peering_score,
+            "ixp": ixp_score,
+            "path_redundancy": path_redundancy_score,
+        }
+        flags = {"single_transit": single_transit, "ddos_provider": ddos_provider}
+        final_score = assessor._calculate_final_score(scores, flags)
+
+        upstream_names = []
+        for u in upstreams[:10]:
+            name = f"AS{u.asn2}"
+            if u.asn2_name:
+                name += f" ({u.asn2_name})"
+            upstream_names.append(name)
+
+        resilience_report = ResilienceReport(
+            asn=asn,
+            score=final_score,
+            transit_score=transit_score,
+            peering_score=peering_score,
+            ixp_score=ixp_score,
+            path_redundancy_score=path_redundancy_score,
+            upstream_count=len(upstreams),
+            peer_count=peer_count,
+            ixp_count=len(ixps),
+            upstreams=upstream_names,
+            ixps=ixp_names,
+            issues=transit_issues,
+            recommendations=[],
+            single_transit=single_transit,
+            ddos_provider_detected=ddos_provider,
+        )
+
+        # --- Gather stability data (optional) ---
+        stability_report = None
+        try:
+            client = await get_ripe_stat()
+            now = datetime.now(UTC)
+            start = now - timedelta(days=7)
+            activity_data = await client.get_bgp_update_activity(f"AS{asn}", start, now)
+            analyzer = get_stability_analyzer()
+            stability_report = analyzer.analyze_update_activity(
+                f"AS{asn}", activity_data
+            )
+        except Exception:
+            logger.debug("Could not fetch stability data for AS%d", asn)
+
+        # --- Gather ROV data (optional) ---
+        rov_report = None
+        try:
+            client = await get_ripe_stat()
+            prefixes = await client.get_announced_prefixes(asn)
+            if prefixes:
+                # Analyze the first prefix as representative
+                first_prefix = prefixes[0]
+                routes = await client.get_bgp_state(first_prefix)
+                if routes:
+                    rov_analyzer = get_rov_coverage_analyzer()
+                    rov_report = rov_analyzer.analyze_prefix_coverage(
+                        first_prefix, routes
+                    )
+        except Exception:
+            logger.debug("Could not fetch ROV data for AS%d", asn)
+
+        # --- Run audit ---
+        auditor = get_compliance_auditor()
+        fw = framework.lower()
+
+        if fw == "dora":
+            report = auditor.audit_dora(
+                asn, resilience_report, stability_report, rov_report
+            )
+            if output_format == "json":
+                import json
+                return json.dumps(report.to_dict(), indent=2)
+            return auditor.format_report(report)
+
+        elif fw == "nis2":
+            report = auditor.audit_nis2(
+                asn, resilience_report, stability_report, rov_report
+            )
+            if output_format == "json":
+                import json
+                return json.dumps(report.to_dict(), indent=2)
+            return auditor.format_report(report)
+
+        else:  # "both"
+            dora_report, nis2_report = auditor.audit_both(
+                asn, resilience_report, stability_report, rov_report
+            )
+            if output_format == "json":
+                import json
+                return json.dumps(
+                    {
+                        "dora": dora_report.to_dict(),
+                        "nis2": nis2_report.to_dict(),
+                    },
+                    indent=2,
+                )
+            return (
+                auditor.format_report(dora_report)
+                + "\n\n---\n\n"
+                + auditor.format_report(nis2_report)
+            )
+
+    except Exception as e:
+        return f"Error running compliance audit for AS{asn}: {e}"
 
 
 # =============================================================================

@@ -6,6 +6,11 @@ from bgp_explorer.analysis.aspa_validation import (
     MonocleASPAProvider,
     create_aspa_validator,
 )
+from bgp_explorer.analysis.compliance import (
+    ComplianceAuditor,
+    ComplianceAuditReport,
+    ComplianceFramework,
+)
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 
 __all__ = [
@@ -14,4 +19,7 @@ __all__ = [
     "ASPAValidator",
     "MonocleASPAProvider",
     "create_aspa_validator",
+    "ComplianceAuditor",
+    "ComplianceAuditReport",
+    "ComplianceFramework",
 ]

@@ -17,6 +17,7 @@ from prompt_toolkit.styles import Style
 
 from bgp_explorer.agent import BGPExplorerAgent
 from bgp_explorer.ai.base import ChatEvent
+from bgp_explorer.analysis.compliance import ComplianceAuditor
 from bgp_explorer.analysis.resilience import ResilienceAssessor
 from bgp_explorer.config import ClaudeModel, OutputFormat, load_settings
 from bgp_explorer.output import OutputFormatter
@@ -554,6 +555,213 @@ async def run_assess(asn: int) -> str:
 
         # Format and return report
         return assessor.format_report(report)
+
+    finally:
+        await peeringdb.disconnect()
+
+
+@cli.command()
+@click.argument("asn", type=int)
+@click.option(
+    "--framework",
+    type=click.Choice(["dora", "nis2", "both"]),
+    default="both",
+    help="Compliance framework to audit against (default: both)",
+)
+@click.option(
+    "--output",
+    "output_format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format (default: text)",
+)
+@click.option(
+    "--save",
+    "save_path",
+    type=click.Path(),
+    help="Save report to file",
+)
+def audit(asn: int, framework: str, output_format: str, save_path: str | None):
+    """Run a DORA/NIS 2 compliance audit on a network's BGP routing.
+
+    Maps BGP analysis to EU regulatory requirements (DORA 2022/2554,
+    NIS 2 2022/2555) and produces a scored compliance report.
+
+    Example:
+        bgp-explorer audit 15169                    # Audit Google (both frameworks)
+        bgp-explorer audit 15169 --framework dora   # DORA only
+        bgp-explorer audit 15169 --output json --save report.json
+    """
+    load_dotenv()
+
+    try:
+        result = asyncio.run(run_audit(asn, framework, output_format))
+        click.echo(result)
+        if save_path:
+            with open(save_path, "w") as f:
+                f.write(result)
+            click.echo(f"\nReport saved to {save_path}")
+    except KeyboardInterrupt:
+        click.echo("\nAudit cancelled.")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        sys.exit(1)
+
+
+async def run_audit(asn: int, framework: str, output_format: str) -> str:
+    """Run the compliance audit for an ASN.
+
+    Args:
+        asn: Autonomous System Number to audit.
+        framework: 'dora', 'nis2', or 'both'.
+        output_format: 'text' or 'json'.
+
+    Returns:
+        Formatted audit report.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from rich.console import Console
+
+    from bgp_explorer.analysis.resilience import ResilienceReport
+    from bgp_explorer.analysis.rov_coverage import ROVCoverageAnalyzer
+    from bgp_explorer.analysis.stability import StabilityAnalyzer
+    from bgp_explorer.sources.ripe_stat import RipeStatClient
+
+    console = Console()
+
+    # Initialize Monocle
+    monocle = MonocleClient()
+    if not await monocle.is_available():
+        return (
+            "Error: Monocle is not installed or not in PATH.\n"
+            "Install with: cargo install monocle\n"
+            "Or run: bgp-explorer install-deps"
+        )
+
+    # Initialize PeeringDB
+    peeringdb = PeeringDBClient(console=console)
+    try:
+        await peeringdb.connect()
+    except Exception as e:
+        return f"Error connecting to PeeringDB: {e}"
+
+    try:
+        console.print(f"[cyan]Running compliance audit for AS{asn}...[/cyan]")
+
+        # --- Build resilience report ---
+        assessor = ResilienceAssessor()
+        upstreams = await monocle.get_as_upstreams(asn)
+        peers = await monocle.get_as_peers(asn)
+        ixps = peeringdb.get_ixps_for_asn(asn)
+
+        peering_score, peer_count = assessor._score_peering(peers)
+        transit_score, transit_issues = assessor._score_transit(upstreams)
+        ixp_score, ixp_names = assessor._score_ixp(ixps)
+        path_redundancy_score = transit_score
+        ddos_provider = assessor._detect_ddos_provider(upstreams)
+        single_transit = len(upstreams) == 1
+
+        scores = {
+            "transit": transit_score,
+            "peering": peering_score,
+            "ixp": ixp_score,
+            "path_redundancy": path_redundancy_score,
+        }
+        flags = {"single_transit": single_transit, "ddos_provider": ddos_provider}
+        final_score = assessor._calculate_final_score(scores, flags)
+
+        upstream_names = []
+        for u in upstreams[:10]:
+            name = f"AS{u.asn2}"
+            if u.asn2_name:
+                name += f" ({u.asn2_name})"
+            upstream_names.append(name)
+
+        resilience_report = ResilienceReport(
+            asn=asn,
+            score=final_score,
+            transit_score=transit_score,
+            peering_score=peering_score,
+            ixp_score=ixp_score,
+            path_redundancy_score=path_redundancy_score,
+            upstream_count=len(upstreams),
+            peer_count=peer_count,
+            ixp_count=len(ixps),
+            upstreams=upstream_names,
+            ixps=ixp_names,
+            issues=transit_issues,
+            recommendations=[],
+            single_transit=single_transit,
+            ddos_provider_detected=ddos_provider,
+        )
+
+        # --- Stability (optional) ---
+        stability_report = None
+        try:
+            console.print("[dim]Fetching stability data...[/dim]")
+            ripe = RipeStatClient()
+            await ripe.connect()
+            now = datetime.now(UTC)
+            start = now - timedelta(days=7)
+            activity_data = await ripe.get_bgp_update_activity(f"AS{asn}", start, now)
+            stability_report = StabilityAnalyzer().analyze_update_activity(
+                f"AS{asn}", activity_data
+            )
+            await ripe.disconnect()
+        except Exception:
+            pass
+
+        # --- ROV (optional) ---
+        rov_report = None
+        try:
+            console.print("[dim]Fetching ROV coverage...[/dim]")
+            ripe = RipeStatClient()
+            await ripe.connect()
+            prefixes = await ripe.get_announced_prefixes(asn)
+            if prefixes:
+                routes = await ripe.get_bgp_state(prefixes[0])
+                if routes:
+                    rov_report = ROVCoverageAnalyzer().analyze_prefix_coverage(
+                        prefixes[0], routes
+                    )
+            await ripe.disconnect()
+        except Exception:
+            pass
+
+        # --- Run audit ---
+        auditor = ComplianceAuditor()
+
+        if framework == "dora":
+            report = auditor.audit_dora(asn, resilience_report, stability_report, rov_report)
+            if output_format == "json":
+                import json
+                return json.dumps(report.to_dict(), indent=2)
+            return auditor.format_report(report)
+
+        elif framework == "nis2":
+            report = auditor.audit_nis2(asn, resilience_report, stability_report, rov_report)
+            if output_format == "json":
+                import json
+                return json.dumps(report.to_dict(), indent=2)
+            return auditor.format_report(report)
+
+        else:  # "both"
+            dora_report, nis2_report = auditor.audit_both(
+                asn, resilience_report, stability_report, rov_report
+            )
+            if output_format == "json":
+                import json
+                return json.dumps(
+                    {"dora": dora_report.to_dict(), "nis2": nis2_report.to_dict()},
+                    indent=2,
+                )
+            return (
+                auditor.format_report(dora_report)
+                + "\n\n---\n\n"
+                + auditor.format_report(nis2_report)
+            )
 
     finally:
         await peeringdb.disconnect()

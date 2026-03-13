@@ -8,7 +8,7 @@ The auditor wraps existing analyzers (resilience, stability, ROV coverage)
 and maps findings to specific regulatory articles.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 
