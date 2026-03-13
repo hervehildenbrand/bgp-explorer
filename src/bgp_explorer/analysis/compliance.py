@@ -127,6 +127,20 @@ class ComplianceAuditor:
         Severity.INFO: 0,
     }
 
+    @staticmethod
+    def _is_effective_single_transit(resilience: ResilienceReport) -> bool:
+        """Check if network has effective single transit.
+
+        A DDoS scrubbing provider as the only second upstream does not
+        provide real transit diversity — traffic still flows through
+        a single real provider.
+        """
+        if resilience.single_transit:
+            return True
+        if resilience.ddos_provider_detected and resilience.upstream_count <= 2:
+            return True
+        return False
+
     # --- Public API ---
 
     def audit_dora(
@@ -285,14 +299,22 @@ class ComplianceAuditor:
         findings: list[ComplianceFinding] = []
 
         # Transit concentration (CRITICAL)
-        if resilience.single_transit:
+        effective_single = self._is_effective_single_transit(resilience)
+        if effective_single:
+            if resilience.ddos_provider_detected and not resilience.single_transit:
+                evidence = (
+                    f"Effective single transit: {resilience.upstream_count} upstreams but "
+                    f"{resilience.ddos_provider_detected} (DDoS provider) is not real transit diversity"
+                )
+            else:
+                evidence = f"Single transit provider detected ({resilience.upstream_count} upstream)"
             findings.append(ComplianceFinding(
                 article="Art. 6(8)",
                 requirement="ICT concentration risk - transit diversity",
                 status=ComplianceLevel.NON_COMPLIANT,
                 severity=Severity.CRITICAL,
-                evidence=f"Single transit provider detected ({resilience.upstream_count} upstream)",
-                recommendation="Add at least one more transit provider to eliminate single point of failure",
+                evidence=evidence,
+                recommendation="Add at least one more independent transit provider to eliminate single point of failure",
                 data_source="resilience",
             ))
         else:
@@ -392,13 +414,21 @@ class ComplianceAuditor:
         findings: list[ComplianceFinding] = []
 
         # Provider concentration (CRITICAL)
-        if resilience.upstream_count < 2:
+        effective_single = self._is_effective_single_transit(resilience)
+        if effective_single:
+            if resilience.ddos_provider_detected and not resilience.single_transit:
+                evidence = (
+                    f"Effective single provider: {resilience.ddos_provider_detected} "
+                    f"(DDoS) does not count as independent transit"
+                )
+            else:
+                evidence = f"Only {resilience.upstream_count} upstream provider(s) — critical concentration risk"
             findings.append(ComplianceFinding(
                 article="Art. 28(1)",
                 requirement="ICT third-party provider concentration risk",
                 status=ComplianceLevel.NON_COMPLIANT,
                 severity=Severity.CRITICAL,
-                evidence=f"Only {resilience.upstream_count} upstream provider(s) — critical concentration risk",
+                evidence=evidence,
                 recommendation="Diversify transit providers to reduce third-party concentration",
                 data_source="resilience",
             ))
@@ -523,10 +553,17 @@ class ComplianceAuditor:
             ))
 
         # Business continuity (HIGH)
-        if resilience.upstream_count < 2 or resilience.ixp_count < 2:
+        effective_single = self._is_effective_single_transit(resilience)
+        if effective_single or resilience.ixp_count < 2:
             issues = []
-            if resilience.upstream_count < 2:
-                issues.append(f"{resilience.upstream_count} upstream(s)")
+            if effective_single:
+                if resilience.ddos_provider_detected and not resilience.single_transit:
+                    issues.append(
+                        f"{resilience.upstream_count} upstream(s) but {resilience.ddos_provider_detected} "
+                        f"(DDoS) is not independent transit"
+                    )
+                else:
+                    issues.append(f"{resilience.upstream_count} upstream(s)")
             if resilience.ixp_count < 2:
                 issues.append(f"{resilience.ixp_count} IXP(s)")
             findings.append(ComplianceFinding(

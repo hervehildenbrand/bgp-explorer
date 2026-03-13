@@ -266,6 +266,35 @@ class TestDORACompliance:
         critical = [f for f in third_party_cats[0].findings if f.severity == Severity.CRITICAL]
         assert len(critical) >= 1
 
+    def test_ddos_provider_as_only_diversity_critical(self, auditor):
+        """DDoS provider as only second upstream = effective single transit."""
+        resilience = make_resilience_report(
+            upstream_count=2, single_transit=False, score=5.0,
+            ddos_provider_detected="Radware",
+        )
+        report = auditor.audit_dora(asn=64496, resilience_report=resilience)
+        # Should trigger CRITICAL transit concentration (effective single transit)
+        critical = [
+            f for f in report.critical_findings if f.severity == Severity.CRITICAL
+        ]
+        assert len(critical) >= 1
+        assert any("transit" in f.evidence.lower() or "ddos" in f.evidence.lower() for f in critical)
+        assert report.overall_level != ComplianceLevel.COMPLIANT
+
+    def test_ddos_provider_with_multiple_real_upstreams_ok(self, auditor):
+        """DDoS provider with 3+ upstreams = still diverse enough."""
+        resilience = make_resilience_report(
+            upstream_count=3, single_transit=False, score=7.0,
+            ddos_provider_detected="Cloudflare",
+        )
+        report = auditor.audit_dora(asn=64496, resilience_report=resilience)
+        # Should NOT trigger CRITICAL transit concentration
+        critical_transit = [
+            f for f in report.critical_findings
+            if f.severity == Severity.CRITICAL and "transit" in f.requirement.lower()
+        ]
+        assert len(critical_transit) == 0
+
     def test_low_peering_medium_finding(self, auditor):
         """Low peer count triggers MEDIUM finding."""
         resilience = make_resilience_report(peer_count=10)
@@ -317,6 +346,23 @@ class TestNIS2Compliance:
             or "rov" in f.requirement.lower()
         ]
         assert len(supply_chain_findings) >= 1
+
+    def test_ddos_provider_effective_single_transit_continuity(self, auditor):
+        """DDoS provider as only second upstream triggers business continuity finding."""
+        resilience = make_resilience_report(
+            upstream_count=2, ixp_count=3, single_transit=False,
+            ddos_provider_detected="Radware",
+        )
+        report = auditor.audit_nis2(asn=64496, resilience_report=resilience)
+        continuity_findings = [
+            f
+            for cat in report.categories
+            for f in cat.findings
+            if "continuity" in f.requirement.lower()
+            or "business" in f.requirement.lower()
+        ]
+        assert len(continuity_findings) >= 1
+        assert any(f.severity == Severity.HIGH for f in continuity_findings)
 
     def test_business_continuity_check(self, auditor):
         """Insufficient upstreams or IXPs triggers business continuity finding."""
