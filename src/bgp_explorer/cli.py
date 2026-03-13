@@ -697,31 +697,43 @@ async def run_audit(asn: int, framework: str, output_format: str) -> str:
             ddos_provider_detected=ddos_provider,
         )
 
-        # --- Stability (optional) ---
-        stability_report = None
+        # --- Fetch announced prefixes ---
+        prefixes = []
         try:
-            console.print("[dim]Fetching stability data...[/dim]")
             ripe = RipeStatClient()
             await ripe.connect()
-            now = datetime.now(UTC)
-            start = now - timedelta(days=7)
-            activity_data = await ripe.get_bgp_update_activity(f"AS{asn}", start, now)
-            stability_report = StabilityAnalyzer().analyze_update_activity(
-                f"AS{asn}", activity_data
-            )
+            prefixes = await ripe.get_announced_prefixes(asn)
             await ripe.disconnect()
+        except Exception:
+            pass
+
+        # --- Stability (optional, per-prefix) ---
+        stability_report = None
+        try:
+            if prefixes:
+                console.print("[dim]Fetching stability data...[/dim]")
+                ripe = RipeStatClient()
+                await ripe.connect()
+                now = datetime.now(UTC)
+                start = now - timedelta(days=7)
+                first_prefix = prefixes[0]
+                activity_data = await ripe.get_bgp_update_activity(
+                    first_prefix, start, now
+                )
+                stability_report = StabilityAnalyzer().analyze_update_activity(
+                    first_prefix, activity_data
+                )
+                await ripe.disconnect()
         except Exception:
             pass
 
         # --- RPKI coverage (optional) ---
         rpki_coverage = None
-        prefixes = []
         try:
-            console.print("[dim]Fetching RPKI validation...[/dim]")
-            ripe = RipeStatClient()
-            await ripe.connect()
-            prefixes = await ripe.get_announced_prefixes(asn)
             if prefixes:
+                console.print("[dim]Fetching RPKI validation...[/dim]")
+                ripe = RipeStatClient()
+                await ripe.connect()
                 valid_count = 0
                 checked = 0
                 for prefix in prefixes:

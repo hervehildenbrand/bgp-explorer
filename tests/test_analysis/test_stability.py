@@ -100,6 +100,37 @@ class TestStabilityAnalyzer:
         assert report.total_updates == 400  # 100+80+120+100 = 400
         assert report.updates_per_day > 100
 
+    def test_analyze_none_values_in_buckets(self, analyzer):
+        """Test that None values in update buckets are treated as 0."""
+        activity_data = {
+            "resource": "AS47957",
+            "updates": [
+                {
+                    "starttime": "2024-01-01T00:00:00",
+                    "announcements": 165,
+                    "withdrawals": None,
+                },
+                {
+                    "starttime": "2024-01-01T06:00:00",
+                    "announcements": None,
+                    "withdrawals": None,
+                },
+                {
+                    "starttime": "2024-01-01T12:00:00",
+                    "announcements": 200,
+                    "withdrawals": 10,
+                },
+            ],
+            "query_starttime": "2024-01-01T00:00:00",
+            "query_endtime": "2024-01-02T00:00:00",
+        }
+
+        report = analyzer.analyze_update_activity("AS47957", activity_data)
+
+        assert report.announcements == 365  # 165 + 0 + 200
+        assert report.withdrawals == 10  # 0 + 0 + 10
+        assert report.total_updates == 375
+
     def test_analyze_moderate_activity(self, analyzer):
         """Test analysis of prefix with moderate activity."""
         # Simulate moderate activity (not stable, not flapping)

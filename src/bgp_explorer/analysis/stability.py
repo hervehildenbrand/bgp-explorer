@@ -78,8 +78,8 @@ class StabilityAnalyzer:
         total_withdrawals = 0
 
         for bucket in activity_data.get("updates", []):
-            total_announcements += bucket.get("announcements", 0)
-            total_withdrawals += bucket.get("withdrawals", 0)
+            total_announcements += bucket.get("announcements") or 0
+            total_withdrawals += bucket.get("withdrawals") or 0
 
         total_updates = total_announcements + total_withdrawals
 

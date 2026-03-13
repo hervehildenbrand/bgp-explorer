@@ -2637,27 +2637,37 @@ async def run_compliance_audit(
             ddos_provider_detected=ddos_provider,
         )
 
-        # --- Gather stability data (optional) ---
-        stability_report = None
+        # --- Fetch announced prefixes (used by stability, RPKI, and ROV) ---
+        prefixes = []
         try:
             client = await get_ripe_stat()
-            now = datetime.now(UTC)
-            start = now - timedelta(days=7)
-            activity_data = await client.get_bgp_update_activity(f"AS{asn}", start, now)
-            analyzer = get_stability_analyzer()
-            stability_report = analyzer.analyze_update_activity(
-                f"AS{asn}", activity_data
-            )
+            prefixes = await client.get_announced_prefixes(asn)
+        except Exception:
+            logger.debug("Could not fetch prefixes for AS%d", asn)
+
+        # --- Gather stability data (optional, per-prefix) ---
+        stability_report = None
+        try:
+            if prefixes:
+                client = await get_ripe_stat()
+                now = datetime.now(UTC)
+                start = now - timedelta(days=7)
+                first_prefix = prefixes[0]
+                activity_data = await client.get_bgp_update_activity(
+                    first_prefix, start, now
+                )
+                analyzer = get_stability_analyzer()
+                stability_report = analyzer.analyze_update_activity(
+                    first_prefix, activity_data
+                )
         except Exception:
             logger.debug("Could not fetch stability data for AS%d", asn)
 
         # --- Gather RPKI coverage (optional) ---
         rpki_coverage = None
-        prefixes = []
         try:
-            client = await get_ripe_stat()
-            prefixes = await client.get_announced_prefixes(asn)
             if prefixes:
+                client = await get_ripe_stat()
                 valid_count = 0
                 checked = 0
                 for prefix in prefixes:
