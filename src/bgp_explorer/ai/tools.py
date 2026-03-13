@@ -2469,9 +2469,10 @@ class BGPTools:
                 f"**Updates:** {report.total_updates:,} total "
                 f"({report.announcements:,} announcements, "
                 f"{report.withdrawals:,} withdrawals)",
-                f"**Updates/Day:** {report.updates_per_day:.1f}",
+                f"**Updates/Day:** {report.updates_per_day:.1f} total, "
+                f"{report.withdrawals_per_day:.1f} withdrawals",
                 f"**Withdrawal Ratio:** {report.withdrawal_ratio:.1%}",
-                f"**Flaps Detected:** {report.flap_count}",
+                f"**Flaps Detected (W→A):** {report.flap_count}",
                 "",
             ]
 

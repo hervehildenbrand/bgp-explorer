@@ -19,6 +19,7 @@ class TestStabilityReport:
             withdrawals=20,
             flap_count=5,
             updates_per_day=50.0,
+            withdrawals_per_day=20.0,
             withdrawal_ratio=0.4,
             stability_score=6.5,
             is_stable=False,
@@ -26,6 +27,7 @@ class TestStabilityReport:
         )
         assert report.resource == "8.8.8.0/24"
         assert report.total_updates == 50
+        assert report.withdrawals_per_day == 20.0
         assert report.stability_score == 6.5
 
 
@@ -70,8 +72,8 @@ class TestStabilityAnalyzer:
         assert report.withdrawals == 0
 
     def test_analyze_flapping_prefix(self, analyzer):
-        """Test analysis of a flapping prefix with many updates."""
-        # Simulate activity data with many updates (flapping)
+        """Test analysis of a flapping prefix with many withdrawals."""
+        # Simulate activity data with many withdrawals (flapping)
         activity_data = {
             "resource": "10.0.0.0/24",
             "updates": [
@@ -94,11 +96,11 @@ class TestStabilityAnalyzer:
 
         report = analyzer.analyze_update_activity("10.0.0.0/24", activity_data)
 
-        assert report.is_flapping is True
+        assert report.is_flapping is True  # 180 withdrawals/day > 30 threshold
         assert report.is_stable is False
         assert report.stability_score <= 5.0  # Low score for flapping
         assert report.total_updates == 400  # 100+80+120+100 = 400
-        assert report.updates_per_day > 100
+        assert report.withdrawals_per_day > 30  # High withdrawal rate
 
     def test_analyze_none_values_in_buckets(self, analyzer):
         """Test that None values in update buckets are treated as 0."""
@@ -156,13 +158,14 @@ class TestStabilityAnalyzer:
 
         report = analyzer.analyze_update_activity("192.168.0.0/24", activity_data)
 
-        assert report.is_stable is False  # > 10 updates/day
-        assert report.is_flapping is False  # < 100 updates/day
+        assert report.is_stable is False  # 15 withdrawals/day > 5 threshold
+        assert report.is_flapping is False  # 15 withdrawals/day < 30 threshold
         assert report.total_updates == 50  # 20+10+15+5 = 50
+        assert report.withdrawals_per_day == 15.0
         assert 5.0 < report.stability_score < 9.0  # Medium score
 
-    def test_detect_flaps_finds_rapid_changes(self, analyzer):
-        """Test flap detection finds rapid announcement/withdrawal sequences."""
+    def test_detect_flaps_finds_withdraw_reannounce(self, analyzer):
+        """Test flap detection finds W→A (withdraw then re-announce) sequences."""
         updates_data = {
             "resource": "8.8.8.0/24",
             "updates": [
@@ -173,25 +176,31 @@ class TestStabilityAnalyzer:
                 },
                 {
                     "type": "W",
-                    "timestamp": "2024-01-01T00:00:30",  # 30 seconds later - flap!
+                    "timestamp": "2024-01-01T00:00:30",
                     "attrs": {"target_prefix": "8.8.8.0/24"},
                 },
                 {
                     "type": "A",
-                    "timestamp": "2024-01-01T00:00:45",  # 15 seconds later - another flap!
+                    "timestamp": "2024-01-01T00:00:45",  # W→A = flap!
                     "attrs": {"target_prefix": "8.8.8.0/24", "path": [174, 15169]},
                 },
                 {
                     "type": "W",
-                    "timestamp": "2024-01-01T00:01:10",  # 25 seconds later - flap!
+                    "timestamp": "2024-01-01T00:01:10",
                     "attrs": {"target_prefix": "8.8.8.0/24"},
+                },
+                {
+                    "type": "A",
+                    "timestamp": "2024-01-01T00:01:20",  # W→A = another flap!
+                    "attrs": {"target_prefix": "8.8.8.0/24", "path": [3356, 15169]},
                 },
             ],
         }
 
         flaps = analyzer.detect_flaps(updates_data, window_seconds=60)
 
-        assert len(flaps) >= 2  # At least 2 flaps detected
+        # 2 W→A transitions: W@:30→A@:45 and W@1:10→A@1:20
+        assert len(flaps) == 2
         assert all(f["prefix"] == "8.8.8.0/24" for f in flaps)
 
     def test_detect_flaps_no_flaps(self, analyzer):
@@ -222,9 +231,9 @@ class TestStabilityAnalyzer:
         assert len(flaps) == 0  # No flaps - updates too far apart
 
     def test_stability_score_perfect(self, analyzer):
-        """Test perfect stability score with 0 updates."""
+        """Test perfect stability score with 0 withdrawals."""
         score = analyzer.calculate_stability_score(
-            updates_per_day=0.0,
+            withdrawals_per_day=0.0,
             withdrawal_ratio=0.0,
             flap_count=0,
         )
@@ -232,14 +241,13 @@ class TestStabilityAnalyzer:
 
     def test_stability_score_high_withdrawal_ratio(self, analyzer):
         """Test that high withdrawal ratio reduces score."""
-        # Low updates but high withdrawal ratio
         score_low_withdrawal = analyzer.calculate_stability_score(
-            updates_per_day=5.0,
+            withdrawals_per_day=5.0,
             withdrawal_ratio=0.1,
             flap_count=0,
         )
         score_high_withdrawal = analyzer.calculate_stability_score(
-            updates_per_day=5.0,
+            withdrawals_per_day=5.0,
             withdrawal_ratio=0.5,
             flap_count=0,
         )
@@ -272,12 +280,12 @@ class TestStabilityAnalyzer:
     def test_stability_score_with_flaps(self, analyzer):
         """Test that flaps reduce stability score."""
         score_no_flaps = analyzer.calculate_stability_score(
-            updates_per_day=50.0,
+            withdrawals_per_day=15.0,
             withdrawal_ratio=0.2,
             flap_count=0,
         )
         score_with_flaps = analyzer.calculate_stability_score(
-            updates_per_day=50.0,
+            withdrawals_per_day=15.0,
             withdrawal_ratio=0.2,
             flap_count=15,
         )
@@ -287,7 +295,7 @@ class TestStabilityAnalyzer:
         """Test that stability score doesn't go below 0."""
         # Extreme case: massive flapping
         score = analyzer.calculate_stability_score(
-            updates_per_day=1000.0,
+            withdrawals_per_day=200.0,
             withdrawal_ratio=0.9,
             flap_count=100,
         )
@@ -344,26 +352,26 @@ class TestStabilityAnalyzer:
         # No flaps: each update is from a different peer
         assert len(flaps) == 0
 
-    def test_detect_flaps_same_peer_detected(self, analyzer):
-        """Test that rapid A/W from the SAME peer IS counted as a flap."""
+    def test_detect_flaps_same_peer_wa_detected(self, analyzer):
+        """Test that W→A from the SAME peer IS counted as a flap."""
         updates_data = {
             "resource": "8.8.8.0/24",
             "updates": [
                 {
-                    "type": "A",
+                    "type": "W",
                     "timestamp": "2024-01-01T00:00:00",
                     "attrs": {
                         "target_prefix": "8.8.8.0/24",
                         "source_id": "rrc00-peer1",
-                        "path": [3356, 15169],
                     },
                 },
                 {
-                    "type": "W",
+                    "type": "A",
                     "timestamp": "2024-01-01T00:00:10",
                     "attrs": {
                         "target_prefix": "8.8.8.0/24",
                         "source_id": "rrc00-peer1",
+                        "path": [3356, 15169],
                     },
                 },
                 {
@@ -388,10 +396,36 @@ class TestStabilityAnalyzer:
 
         flaps = analyzer.detect_flaps(updates_data, window_seconds=60)
 
-        # Only 1 flap: the A->W from rrc00-peer1
+        # Only 1 flap: the W→A from rrc00-peer1 (route disappeared then came back)
         assert len(flaps) == 1
         assert flaps[0]["peer"] == "rrc00-peer1"
         assert flaps[0]["prefix"] == "8.8.8.0/24"
+
+    def test_detect_flaps_aw_not_counted(self, analyzer):
+        """Test that A→W alone is NOT counted as a flap.
+
+        A→W is just a withdrawal. Only W→A (route came back) is a flap.
+        """
+        updates_data = {
+            "resource": "8.8.8.0/24",
+            "updates": [
+                {
+                    "type": "A",
+                    "timestamp": "2024-01-01T00:00:00",
+                    "attrs": {"target_prefix": "8.8.8.0/24", "path": [3356, 15169]},
+                },
+                {
+                    "type": "W",
+                    "timestamp": "2024-01-01T00:00:10",
+                    "attrs": {"target_prefix": "8.8.8.0/24"},
+                },
+            ],
+        }
+
+        flaps = analyzer.detect_flaps(updates_data, window_seconds=60)
+
+        # A→W is not a flap, it's just a withdrawal
+        assert len(flaps) == 0
 
     def test_flap_count_triggers_is_flapping(self, analyzer):
         """Test that high flap count alone can trigger is_flapping."""

@@ -52,6 +52,7 @@ def make_resilience_report(
 def make_stability_report(
     resource: str = "AS64496",
     updates_per_day: float = 5.0,
+    withdrawals_per_day: float = 0.7,
     is_stable: bool = True,
     is_flapping: bool = False,
 ) -> StabilityReport:
@@ -64,6 +65,7 @@ def make_stability_report(
         withdrawals=5,
         flap_count=0 if not is_flapping else 15,
         updates_per_day=updates_per_day,
+        withdrawals_per_day=withdrawals_per_day,
         withdrawal_ratio=0.14,
         stability_score=9.0 if is_stable else 3.0,
         is_stable=is_stable,

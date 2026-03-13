@@ -422,7 +422,7 @@ class ComplianceAuditor:
                     requirement="ICT system stability monitoring",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.MEDIUM,
-                    evidence=f"Route flapping detected: {stability.updates_per_day:.0f} updates/day, {stability.flap_count} flaps",
+                    evidence=f"Route flapping detected: {stability.withdrawals_per_day:.0f} withdrawals/day, {stability.flap_count} W→A flaps",
                     recommendation="Investigate route instability and implement route dampening",
                     data_source="stability",
                 ))
@@ -539,13 +539,13 @@ class ComplianceAuditor:
             ))
         else:
             # High incident rate (MEDIUM)
-            if stability.updates_per_day > 100:
+            if stability.withdrawals_per_day > 30:
                 findings.append(ComplianceFinding(
                     article="Art. 19(1)",
                     requirement="ICT incident rate monitoring",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.MEDIUM,
-                    evidence=f"High routing update rate: {stability.updates_per_day:.0f} updates/day",
+                    evidence=f"High withdrawal rate: {stability.withdrawals_per_day:.0f} withdrawals/day",
                     recommendation="Investigate high update frequency and establish baseline thresholds",
                     data_source="stability",
                 ))
@@ -750,7 +750,7 @@ class ComplianceAuditor:
                     requirement="Baseline monitoring for incident reporting",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.MEDIUM,
-                    evidence=f"Route instability detected: {stability.updates_per_day:.0f} updates/day",
+                    evidence=f"Route instability detected: {stability.withdrawals_per_day:.0f} withdrawals/day",
                     recommendation="Establish baseline monitoring thresholds and investigate instability",
                     data_source="stability",
                 ))
