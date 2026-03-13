@@ -127,41 +127,45 @@ class StabilityAnalyzer:
     ) -> list[dict]:
         """Detect route flaps in BGP update stream.
 
-        A flap is defined as an announcement followed by a withdrawal
-        (or vice versa) for the same prefix within the specified window.
+        A flap is defined as a single peer observing an announcement followed
+        by a withdrawal (or vice versa) for the same prefix within the
+        specified time window. Updates from different peers are independent
+        observations and are NOT counted as flaps.
 
         Args:
             updates_data: Raw data from get_bgp_updates().
             window_seconds: Time window in seconds to consider as a flap.
 
         Returns:
-            List of flap events with prefix, time, and update count.
+            List of flap events with prefix, peer, time, and update count.
         """
         updates = updates_data.get("updates", [])
         if not updates:
             return []
 
         flaps = []
-        # Group updates by prefix
-        prefix_updates: dict[str, list[dict]] = {}
+        # Group updates by (prefix, peer) — only same-peer state changes are flaps
+        keyed_updates: dict[tuple[str, str], list[dict]] = {}
 
         for update in updates:
             attrs = update.get("attrs", {})
             prefix = attrs.get("target_prefix", "")
+            peer = attrs.get("source_id", "")
             if prefix:
-                if prefix not in prefix_updates:
-                    prefix_updates[prefix] = []
-                prefix_updates[prefix].append(update)
+                key = (prefix, peer)
+                if key not in keyed_updates:
+                    keyed_updates[key] = []
+                keyed_updates[key].append(update)
 
-        # Check each prefix for flaps
-        for prefix, prefix_update_list in prefix_updates.items():
+        # Check each (prefix, peer) pair for flaps
+        for (prefix, peer), update_list in keyed_updates.items():
             # Sort by timestamp
             sorted_updates = sorted(
-                prefix_update_list,
+                update_list,
                 key=lambda u: u.get("timestamp", ""),
             )
 
-            # Look for rapid A/W or W/A sequences
+            # Look for rapid A/W or W/A sequences from the same peer
             for i in range(len(sorted_updates) - 1):
                 current = sorted_updates[i]
                 next_update = sorted_updates[i + 1]
@@ -185,6 +189,7 @@ class StabilityAnalyzer:
                             flaps.append(
                                 {
                                     "prefix": prefix,
+                                    "peer": peer,
                                     "flap_time": current.get("timestamp", ""),
                                     "updates_in_window": updates_in_window,
                                 }

@@ -293,6 +293,106 @@ class TestStabilityAnalyzer:
         )
         assert score >= 0.0
 
+    def test_detect_flaps_cross_peer_not_counted(self, analyzer):
+        """Test that updates from different peers are NOT counted as flaps.
+
+        This is the key correctness check: if peer A announces and peer B
+        withdraws, that's two independent observations, not a flap.
+        """
+        updates_data = {
+            "resource": "8.8.8.0/24",
+            "updates": [
+                {
+                    "type": "A",
+                    "timestamp": "2024-01-01T00:00:00",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc00-peer1",
+                        "path": [3356, 15169],
+                    },
+                },
+                {
+                    "type": "W",
+                    "timestamp": "2024-01-01T00:00:10",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc01-peer2",
+                    },
+                },
+                {
+                    "type": "A",
+                    "timestamp": "2024-01-01T00:00:20",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc03-peer3",
+                        "path": [174, 15169],
+                    },
+                },
+                {
+                    "type": "W",
+                    "timestamp": "2024-01-01T00:00:30",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc04-peer4",
+                    },
+                },
+            ],
+        }
+
+        flaps = analyzer.detect_flaps(updates_data, window_seconds=60)
+
+        # No flaps: each update is from a different peer
+        assert len(flaps) == 0
+
+    def test_detect_flaps_same_peer_detected(self, analyzer):
+        """Test that rapid A/W from the SAME peer IS counted as a flap."""
+        updates_data = {
+            "resource": "8.8.8.0/24",
+            "updates": [
+                {
+                    "type": "A",
+                    "timestamp": "2024-01-01T00:00:00",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc00-peer1",
+                        "path": [3356, 15169],
+                    },
+                },
+                {
+                    "type": "W",
+                    "timestamp": "2024-01-01T00:00:10",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc00-peer1",
+                    },
+                },
+                {
+                    "type": "A",
+                    "timestamp": "2024-01-01T00:00:05",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc01-peer2",
+                        "path": [174, 15169],
+                    },
+                },
+                {
+                    "type": "W",
+                    "timestamp": "2024-01-01T00:00:15",
+                    "attrs": {
+                        "target_prefix": "8.8.8.0/24",
+                        "source_id": "rrc03-peer3",
+                    },
+                },
+            ],
+        }
+
+        flaps = analyzer.detect_flaps(updates_data, window_seconds=60)
+
+        # Only 1 flap: the A->W from rrc00-peer1
+        assert len(flaps) == 1
+        assert flaps[0]["peer"] == "rrc00-peer1"
+        assert flaps[0]["prefix"] == "8.8.8.0/24"
+
     def test_flap_count_triggers_is_flapping(self, analyzer):
         """Test that high flap count alone can trigger is_flapping."""
         activity_data = {
