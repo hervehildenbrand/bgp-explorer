@@ -713,20 +713,44 @@ async def run_audit(asn: int, framework: str, output_format: str) -> str:
         except Exception:
             pass
 
-        # --- ROV (optional) ---
-        rov_report = None
+        # --- RPKI coverage (optional) ---
+        rpki_coverage = None
+        prefixes = []
         try:
-            console.print("[dim]Fetching ROV coverage...[/dim]")
+            console.print("[dim]Fetching RPKI validation...[/dim]")
             ripe = RipeStatClient()
             await ripe.connect()
             prefixes = await ripe.get_announced_prefixes(asn)
             if prefixes:
+                valid_count = 0
+                checked = 0
+                for prefix in prefixes:
+                    try:
+                        status = await ripe.get_rpki_validation(prefix, asn)
+                        checked += 1
+                        if status == "valid":
+                            valid_count += 1
+                    except Exception:
+                        pass
+                if checked > 0:
+                    rpki_coverage = valid_count / checked
+            await ripe.disconnect()
+        except Exception:
+            pass
+
+        # --- ROV (optional) ---
+        rov_report = None
+        try:
+            if prefixes:
+                console.print("[dim]Fetching ROV coverage...[/dim]")
+                ripe = RipeStatClient()
+                await ripe.connect()
                 routes = await ripe.get_bgp_state(prefixes[0])
                 if routes:
                     rov_report = ROVCoverageAnalyzer().analyze_prefix_coverage(
                         prefixes[0], routes
                     )
-            await ripe.disconnect()
+                await ripe.disconnect()
         except Exception:
             pass
 
@@ -734,14 +758,20 @@ async def run_audit(asn: int, framework: str, output_format: str) -> str:
         auditor = ComplianceAuditor()
 
         if framework == "dora":
-            report = auditor.audit_dora(asn, resilience_report, stability_report, rov_report)
+            report = auditor.audit_dora(
+                asn, resilience_report, stability_report, rov_report,
+                rpki_coverage=rpki_coverage,
+            )
             if output_format == "json":
                 import json
                 return json.dumps(report.to_dict(), indent=2)
             return auditor.format_report(report)
 
         elif framework == "nis2":
-            report = auditor.audit_nis2(asn, resilience_report, stability_report, rov_report)
+            report = auditor.audit_nis2(
+                asn, resilience_report, stability_report, rov_report,
+                rpki_coverage=rpki_coverage,
+            )
             if output_format == "json":
                 import json
                 return json.dumps(report.to_dict(), indent=2)
@@ -749,7 +779,8 @@ async def run_audit(asn: int, framework: str, output_format: str) -> str:
 
         else:  # "both"
             dora_report, nis2_report = auditor.audit_both(
-                asn, resilience_report, stability_report, rov_report
+                asn, resilience_report, stability_report, rov_report,
+                rpki_coverage=rpki_coverage,
             )
             if output_format == "json":
                 import json

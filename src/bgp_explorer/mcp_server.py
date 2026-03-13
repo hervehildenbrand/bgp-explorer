@@ -2651,13 +2651,33 @@ async def run_compliance_audit(
         except Exception:
             logger.debug("Could not fetch stability data for AS%d", asn)
 
-        # --- Gather ROV data (optional) ---
-        rov_report = None
+        # --- Gather RPKI coverage (optional) ---
+        rpki_coverage = None
+        prefixes = []
         try:
             client = await get_ripe_stat()
             prefixes = await client.get_announced_prefixes(asn)
             if prefixes:
-                # Analyze the first prefix as representative
+                valid_count = 0
+                checked = 0
+                for prefix in prefixes:
+                    try:
+                        status = await client.get_rpki_validation(prefix, asn)
+                        checked += 1
+                        if status == "valid":
+                            valid_count += 1
+                    except Exception:
+                        pass
+                if checked > 0:
+                    rpki_coverage = valid_count / checked
+        except Exception:
+            logger.debug("Could not fetch RPKI data for AS%d", asn)
+
+        # --- Gather ROV data (optional) ---
+        rov_report = None
+        try:
+            if prefixes:
+                client = await get_ripe_stat()
                 first_prefix = prefixes[0]
                 routes = await client.get_bgp_state(first_prefix)
                 if routes:
@@ -2674,7 +2694,8 @@ async def run_compliance_audit(
 
         if fw == "dora":
             report = auditor.audit_dora(
-                asn, resilience_report, stability_report, rov_report
+                asn, resilience_report, stability_report, rov_report,
+                rpki_coverage=rpki_coverage,
             )
             if output_format == "json":
                 import json
@@ -2683,7 +2704,8 @@ async def run_compliance_audit(
 
         elif fw == "nis2":
             report = auditor.audit_nis2(
-                asn, resilience_report, stability_report, rov_report
+                asn, resilience_report, stability_report, rov_report,
+                rpki_coverage=rpki_coverage,
             )
             if output_format == "json":
                 import json
@@ -2692,7 +2714,8 @@ async def run_compliance_audit(
 
         else:  # "both"
             dora_report, nis2_report = auditor.audit_both(
-                asn, resilience_report, stability_report, rov_report
+                asn, resilience_report, stability_report, rov_report,
+                rpki_coverage=rpki_coverage,
             )
             if output_format == "json":
                 import json

@@ -150,9 +150,12 @@ class ComplianceAuditor:
         stability_report: StabilityReport | None = None,
         rov_report: ROVCoverageReport | None = None,
         contacts: dict | None = None,
+        rpki_coverage: float | None = None,
     ) -> ComplianceAuditReport:
         categories = [
-            self._check_dora_ict_risk(resilience_report, stability_report, rov_report),
+            self._check_dora_ict_risk(
+                resilience_report, stability_report, rov_report, rpki_coverage
+            ),
             self._check_dora_third_party(resilience_report),
             self._check_dora_incident_mgmt(stability_report, contacts),
         ]
@@ -165,9 +168,12 @@ class ComplianceAuditor:
         stability_report: StabilityReport | None = None,
         rov_report: ROVCoverageReport | None = None,
         aspa_results: list[dict] | None = None,
+        rpki_coverage: float | None = None,
     ) -> ComplianceAuditReport:
         categories = [
-            self._check_nis2_risk_mgmt(resilience_report, rov_report, aspa_results),
+            self._check_nis2_risk_mgmt(
+                resilience_report, rov_report, aspa_results, rpki_coverage
+            ),
             self._check_nis2_incident_reporting(stability_report),
         ]
         return self._build_report(asn, ComplianceFramework.NIS2, categories)
@@ -180,9 +186,14 @@ class ComplianceAuditor:
         rov_report: ROVCoverageReport | None = None,
         aspa_results: list[dict] | None = None,
         contacts: dict | None = None,
+        rpki_coverage: float | None = None,
     ) -> tuple[ComplianceAuditReport, ComplianceAuditReport]:
-        dora = self.audit_dora(asn, resilience_report, stability_report, rov_report, contacts)
-        nis2 = self.audit_nis2(asn, resilience_report, stability_report, rov_report, aspa_results)
+        dora = self.audit_dora(
+            asn, resilience_report, stability_report, rov_report, contacts, rpki_coverage
+        )
+        nis2 = self.audit_nis2(
+            asn, resilience_report, stability_report, rov_report, aspa_results, rpki_coverage
+        )
         return dora, nis2
 
     def format_report(self, report: ComplianceAuditReport) -> str:
@@ -295,6 +306,7 @@ class ComplianceAuditor:
         resilience: ResilienceReport,
         stability: StabilityReport | None,
         rov: ROVCoverageReport | None,
+        rpki_coverage: float | None = None,
     ) -> ComplianceCategoryReport:
         findings: list[ComplianceFinding] = []
 
@@ -340,36 +352,65 @@ class ComplianceAuditor:
                 data_source="resilience",
             ))
 
-        # RPKI/ROV deployment (HIGH)
-        if rov is not None:
-            if rov.protection_level == "low":
+        # ROA deployment — ASN's own responsibility (HIGH)
+        if rpki_coverage is not None:
+            if rpki_coverage >= 0.8:
                 findings.append(ComplianceFinding(
                     article="Art. 9(2)",
-                    requirement="RPKI/ROV deployment for route origin validation",
+                    requirement="ROA deployment for route origin authorization",
+                    status=ComplianceLevel.COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence=f"RPKI ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
+                    recommendation="",
+                    data_source="rpki_validation",
+                ))
+            else:
+                findings.append(ComplianceFinding(
+                    article="Art. 9(2)",
+                    requirement="ROA deployment for route origin authorization",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.HIGH,
-                    evidence=f"Low ROV protection: {rov.path_coverage:.0%} path coverage",
-                    recommendation="Deploy RPKI ROAs and encourage upstream providers to enforce ROV",
-                    data_source="rov_coverage",
+                    evidence=f"Low ROA coverage: only {rpki_coverage:.0%} of prefixes have ROAs",
+                    recommendation="Create RPKI ROAs for all announced prefixes via your RIR portal",
+                    data_source="rpki_validation",
                 ))
-            elif rov.protection_level == "medium":
-                findings.append(ComplianceFinding(
-                    article="Art. 9(2)",
-                    requirement="RPKI/ROV deployment for route origin validation",
-                    status=ComplianceLevel.PARTIAL,
-                    severity=Severity.MEDIUM,
-                    evidence=f"Medium ROV protection: {rov.path_coverage:.0%} path coverage",
-                    recommendation="Increase ROV coverage by working with transit providers",
-                    data_source="rov_coverage",
-                ))
+        elif rov is not None and rov.protection_level == "low":
+            # No direct RPKI data — fall back to ROV as proxy
+            findings.append(ComplianceFinding(
+                article="Art. 9(2)",
+                requirement="ROA deployment for route origin authorization",
+                status=ComplianceLevel.NON_COMPLIANT,
+                severity=Severity.HIGH,
+                evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests possible missing ROAs",
+                recommendation="Verify ROA deployment via your RIR portal and create ROAs for all prefixes",
+                data_source="rov_coverage",
+            ))
         else:
             findings.append(ComplianceFinding(
                 article="Art. 9(2)",
-                requirement="RPKI/ROV deployment for route origin validation",
+                requirement="ROA deployment for route origin authorization",
                 status=ComplianceLevel.NOT_ASSESSED,
                 severity=Severity.HIGH,
-                evidence="ROV coverage data not available",
-                recommendation="Run ROV coverage analysis to assess RPKI deployment",
+                evidence="RPKI validation data not available",
+                recommendation="Run RPKI validation check to assess ROA deployment",
+                data_source="rpki_validation",
+            ))
+
+        # ROV enforcement coverage — ecosystem issue (INFO)
+        if rov is not None:
+            findings.append(ComplianceFinding(
+                article="Art. 9(2)",
+                requirement="ROV enforcement coverage (ecosystem)",
+                status=ComplianceLevel.PARTIAL if rov.protection_level != "high" else ComplianceLevel.COMPLIANT,
+                severity=Severity.INFO,
+                evidence=(
+                    f"ROV enforcement: {rov.path_coverage:.0%} of paths pass through ROV-enforcing networks. "
+                    f"This reflects upstream/ecosystem adoption, not the ASN's own deployment."
+                ),
+                recommendation=(
+                    "Encourage transit providers to enforce ROV filtering"
+                    if rov.protection_level != "high" else ""
+                ),
                 data_source="rov_coverage",
             ))
 
@@ -537,6 +578,7 @@ class ComplianceAuditor:
         resilience: ResilienceReport,
         rov: ROVCoverageReport | None,
         aspa_results: list[dict] | None,
+        rpki_coverage: float | None = None,
     ) -> ComplianceCategoryReport:
         findings: list[ComplianceFinding] = []
 
@@ -576,26 +618,64 @@ class ComplianceAuditor:
                 data_source="resilience",
             ))
 
-        # Supply chain RPKI (HIGH)
-        if rov is not None:
-            if rov.protection_level == "low":
+        # Supply chain RPKI — ROA deployment (HIGH)
+        if rpki_coverage is not None:
+            if rpki_coverage >= 0.8:
                 findings.append(ComplianceFinding(
                     article="Art. 21(2)(d)",
-                    requirement="Supply chain security — RPKI/ROV coverage",
+                    requirement="Supply chain security — ROA deployment",
+                    status=ComplianceLevel.COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence=f"RPKI ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
+                    recommendation="",
+                    data_source="rpki_validation",
+                ))
+            else:
+                findings.append(ComplianceFinding(
+                    article="Art. 21(2)(d)",
+                    requirement="Supply chain security — ROA deployment",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.HIGH,
-                    evidence=f"Low ROV coverage: {rov.path_coverage:.0%} of paths protected",
-                    recommendation="Deploy RPKI ROAs and work with providers to enforce ROV filtering",
-                    data_source="rov_coverage",
+                    evidence=f"Low ROA coverage: only {rpki_coverage:.0%} of prefixes have ROAs",
+                    recommendation="Create RPKI ROAs for all announced prefixes",
+                    data_source="rpki_validation",
                 ))
+        elif rov is not None and rov.protection_level == "low":
+            findings.append(ComplianceFinding(
+                article="Art. 21(2)(d)",
+                requirement="Supply chain security — ROA deployment",
+                status=ComplianceLevel.NON_COMPLIANT,
+                severity=Severity.HIGH,
+                evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests possible missing ROAs",
+                recommendation="Verify ROA deployment and create ROAs for all prefixes",
+                data_source="rov_coverage",
+            ))
         else:
             findings.append(ComplianceFinding(
                 article="Art. 21(2)(d)",
-                requirement="Supply chain security — RPKI/ROV coverage",
+                requirement="Supply chain security — ROA deployment",
                 status=ComplianceLevel.NOT_ASSESSED,
                 severity=Severity.HIGH,
-                evidence="ROV coverage data not available",
-                recommendation="Run ROV coverage analysis to assess supply chain routing security",
+                evidence="RPKI validation data not available",
+                recommendation="Run RPKI validation to assess supply chain routing security",
+                data_source="rpki_validation",
+            ))
+
+        # Supply chain — ROV enforcement (INFO, ecosystem issue)
+        if rov is not None:
+            findings.append(ComplianceFinding(
+                article="Art. 21(2)(d)",
+                requirement="Supply chain ROV enforcement (ecosystem)",
+                status=ComplianceLevel.PARTIAL if rov.protection_level != "high" else ComplianceLevel.COMPLIANT,
+                severity=Severity.INFO,
+                evidence=(
+                    f"ROV enforcement: {rov.path_coverage:.0%} of paths through ROV-enforcing networks. "
+                    f"This is an ecosystem metric, not under the ASN's direct control."
+                ),
+                recommendation=(
+                    "Encourage transit providers to enforce ROV"
+                    if rov.protection_level != "high" else ""
+                ),
                 data_source="rov_coverage",
             ))
 
@@ -613,14 +693,25 @@ class ComplianceAuditor:
                     data_source="aspa",
                 ))
 
-        # Routing security — RPKI (HIGH)
-        if rov is not None and rov.protection_level == "low":
+        # Routing security — ROA deployment (HIGH)
+        if rpki_coverage is not None:
+            if rpki_coverage < 0.8:
+                findings.append(ComplianceFinding(
+                    article="Art. 21(2)(e)",
+                    requirement="Routing security — RPKI ROA deployment",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence=f"Low ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
+                    recommendation="Implement RPKI ROAs for all announced prefixes",
+                    data_source="rpki_validation",
+                ))
+        elif rov is not None and rov.protection_level == "low":
             findings.append(ComplianceFinding(
                 article="Art. 21(2)(e)",
-                requirement="Routing security — network and information systems",
+                requirement="Routing security — RPKI ROA deployment",
                 status=ComplianceLevel.NON_COMPLIANT,
                 severity=Severity.HIGH,
-                evidence=f"RPKI not effectively deployed: {rov.path_coverage:.0%} coverage",
+                evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests RPKI gaps",
                 recommendation="Implement RPKI for all announced prefixes",
                 data_source="rov_coverage",
             ))

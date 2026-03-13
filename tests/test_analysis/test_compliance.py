@@ -206,6 +206,7 @@ class TestDORACompliance:
             resilience_report=resilience,
             stability_report=stability,
             rov_report=rov,
+            rpki_coverage=0.95,
         )
         assert report.overall_level == ComplianceLevel.COMPLIANT
         assert report.overall_score >= 80
@@ -223,8 +224,48 @@ class TestDORACompliance:
         ]
         assert len(high_findings) >= 1
 
+    def test_low_roa_deployment_high_finding(self, auditor):
+        """Low ROA coverage (ASN's own deployment) triggers HIGH finding."""
+        resilience = make_resilience_report()
+        report = auditor.audit_dora(
+            asn=64496, resilience_report=resilience, rpki_coverage=0.3
+        )
+        roa_findings = [
+            f
+            for cat in report.categories
+            for f in cat.findings
+            if "roa" in f.requirement.lower() and f.status == ComplianceLevel.NON_COMPLIANT
+        ]
+        assert len(roa_findings) >= 1
+        assert any(f.severity == Severity.HIGH for f in roa_findings)
+
+    def test_high_roa_low_rov_info_only(self, auditor):
+        """High ROA coverage but low ROV enforcement is INFO (not the ASN's fault)."""
+        resilience = make_resilience_report()
+        rov = make_rov_report(protection_level="low", path_coverage=0.3)
+        report = auditor.audit_dora(
+            asn=64496, resilience_report=resilience, rpki_coverage=0.9, rov_report=rov
+        )
+        # ROA deployment should be COMPLIANT
+        roa_findings = [
+            f
+            for cat in report.categories
+            for f in cat.findings
+            if "roa" in f.requirement.lower()
+        ]
+        assert any(f.status == ComplianceLevel.COMPLIANT for f in roa_findings)
+        # ROV enforcement should be INFO (ecosystem issue, no penalty)
+        rov_findings = [
+            f
+            for cat in report.categories
+            for f in cat.findings
+            if "rov" in f.requirement.lower() and "enforcement" in f.requirement.lower()
+        ]
+        assert len(rov_findings) >= 1
+        assert all(f.severity == Severity.INFO for f in rov_findings)
+
     def test_rpki_not_deployed_high_finding(self, auditor):
-        """Low RPKI/ROV protection triggers HIGH finding."""
+        """Low RPKI/ROV protection triggers HIGH finding when no rpki_coverage provided."""
         resilience = make_resilience_report()
         rov = make_rov_report(protection_level="low", path_coverage=0.1)
         report = auditor.audit_dora(
@@ -234,7 +275,7 @@ class TestDORACompliance:
             f
             for cat in report.categories
             for f in cat.findings
-            if "rpki" in f.requirement.lower() or "rov" in f.requirement.lower()
+            if "roa" in f.requirement.lower() or "rov" in f.requirement.lower()
         ]
         assert len(rpki_findings) >= 1
         assert any(f.status == ComplianceLevel.NON_COMPLIANT for f in rpki_findings)
@@ -390,6 +431,7 @@ class TestNIS2Compliance:
             resilience_report=resilience,
             stability_report=stability,
             rov_report=rov,
+            rpki_coverage=0.95,
         )
         assert report.overall_level == ComplianceLevel.COMPLIANT
         assert report.overall_score >= 80
@@ -539,6 +581,7 @@ class TestFormatReport:
             resilience_report=resilience,
             stability_report=stability,
             rov_report=rov,
+            rpki_coverage=0.95,
         )
         text = auditor.format_report(report)
         assert "COMPLIANT" in text
@@ -565,19 +608,19 @@ class TestMissingOptionalData:
         assert len(incident_cats) == 1
 
     def test_missing_rov_not_assessed(self, auditor):
-        """Missing ROV data produces NOT_ASSESSED findings."""
+        """Missing ROV and RPKI data produces NOT_ASSESSED findings."""
         resilience = make_resilience_report()
         report = auditor.audit_dora(
-            asn=64496, resilience_report=resilience, rov_report=None
+            asn=64496, resilience_report=resilience, rov_report=None, rpki_coverage=None
         )
-        rov_findings = [
+        roa_findings = [
             f
             for cat in report.categories
             for f in cat.findings
-            if ("rpki" in f.requirement.lower() or "rov" in f.requirement.lower())
+            if "roa" in f.requirement.lower()
             and f.status == ComplianceLevel.NOT_ASSESSED
         ]
-        assert len(rov_findings) >= 1
+        assert len(roa_findings) >= 1
 
     def test_all_optional_missing_still_works(self, auditor):
         """Audit works with only resilience report (minimum required)."""
