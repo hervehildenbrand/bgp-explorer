@@ -36,7 +36,7 @@ class StabilityReport:
 # Re-announcements (path changes) are normal BGP behavior, not instability.
 STABLE_THRESHOLD = 5  # withdrawals/day - below this is considered stable
 FLAPPING_THRESHOLD = 30  # withdrawals/day - above this is considered flapping
-FLAP_COUNT_THRESHOLD = 10  # flaps - above this triggers is_flapping
+FLAPS_PER_DAY_THRESHOLD = 5  # W→A flaps/day - above this triggers is_flapping
 
 
 class StabilityAnalyzer:
@@ -109,10 +109,14 @@ class StabilityAnalyzer:
         )
 
         # Stability flags based on withdrawal rate
+        # Flap threshold scales with observation period (flaps/day, not raw count)
+        flaps_per_day = self._calculate_rate_per_day(
+            flap_count, period_start, period_end
+        )
         is_stable = withdrawals_per_day < STABLE_THRESHOLD
         is_flapping = (
             withdrawals_per_day > FLAPPING_THRESHOLD
-            or flap_count > FLAP_COUNT_THRESHOLD
+            or flaps_per_day > FLAPS_PER_DAY_THRESHOLD
         )
 
         return StabilityReport(
