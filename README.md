@@ -215,28 +215,60 @@ Options:
 > Should we peer with AS64496?
 ```
 
-## Available Tools (24 total)
+## Available Tools (34 total)
 
+### Core Routing Tools
 | Tool | Description |
 |------|-------------|
+| `search_asn` | Search for ASN by name or description |
 | `lookup_prefix` | Get origin ASN, AS paths, and visibility for a prefix |
 | `get_asn_announcements` | List all prefixes announced by an ASN |
 | `get_asn_details` | Detailed ASN analysis with upstream/downstream relationships |
 | `get_routing_history` | Historical routing data for a resource |
 | `analyze_as_path` | Path diversity, upstream providers, transit ASNs, prepending detection |
 | `compare_collectors` | Compare routing views across collectors, detect inconsistencies |
-| `get_rpki_status` | RPKI validation (valid/invalid/not-found) |
 | `check_prefix_anomalies` | On-demand hijack detection (MOAS, RPKI, origin changes, visibility) |
-| `get_anomalies` | Real-time BGP anomalies from bgp-radar |
+
+### RPKI / ROV / ASPA Security
+| Tool | Description |
+|------|-------------|
+| `get_rpki_status` | RPKI ROA validation for a prefix/origin pair |
+| `check_rpki_for_asn` | Bulk RPKI check for all prefixes of an ASN + ASPA status |
+| `validate_prefix_routes` | Combined ROV + ASPA per-route validation with aggregate stats |
+| `analyze_rov_coverage` | ROV enforcement coverage + combined ASPA+ROV protection score |
+| `verify_aspa_path` | ASPA path authorization with per-hop source tags and confidence |
+| `get_aspa_status` | Check if an ASN has published ASPA objects |
+| `get_roa_guidance` | Identify missing ROAs and permissive maxLength issues |
+| `get_aspa_guidance` | Compare published ASPA with observed upstreams, recommend changes |
+| `run_compliance_audit` | DORA/NIS2 compliance audit mapping RPKI/ASPA findings to EU regulations |
+
+### Network Topology
+| Tool | Description |
+|------|-------------|
+| `get_as_peers` | Get peer relationships for an AS |
+| `get_as_upstreams` | Get upstream transit providers |
+| `get_as_downstreams` | Get downstream customers |
+| `check_as_relationship` | Check relationship between two specific ASes |
+| `get_as_connectivity_summary` | Full connectivity overview for an AS |
+| `get_network_contacts` | Get NOC/abuse contacts from PeeringDB |
+| `assess_network_resilience` | Score network resilience (1-10) with transit, peering, IXP analysis |
+
+### Network Probing
+| Tool | Description |
+|------|-------------|
 | `ping_from_global` | Ping from worldwide vantage points |
 | `traceroute_from_global` | Traceroute from multiple locations |
-| `get_as_relationships` | Get all relationships for an AS (peers, upstreams, downstreams) |
-| `get_as_connectivity` | Get connectivity summary for an AS |
-| `check_as_relationship` | Check relationship between two specific ASes |
-| `get_network_contacts` | Get NOC/abuse contacts from PeeringDB |
-| `search_asn` | Search for ASN by name or description |
-| `get_ixp_presence` | Get IXP presence for an ASN |
-| `assess_network_resilience` | Score network resilience (1-10) with transit, peering, IXP analysis |
+| `query_looking_glass` | Query BGP tables from RIPE RIS vantage points |
+
+### Other Tools
+| Tool | Description |
+|------|-------------|
+| `get_whois_data` | WHOIS and IRR data for ASN or prefix |
+| `get_prefix_stability` | Route stability analysis (flapping, withdrawals) |
+| `get_bgp_update_activity` | BGP update activity time series |
+| `get_ixps_for_asn` | IXP presence for an ASN |
+| `get_networks_at_ixp` | Networks at an IXP |
+| `get_ixp_details` | Details about an IXP |
 
 ## Commands
 
@@ -265,22 +297,24 @@ User → CLI (cli.py) → Agent (agent.py) → AI Backend (claude)
                                               ↓
                                         Tools (ai/tools.py)
                                               ↓
-                    ┌─────────────┬───────────┴───────────┬─────────────┐
-                    ↓             ↓                       ↓             ↓
-              bgp-radar      RIPE Stat              Globalping    BGPStream
-            [real-time]    [state/history]          [probing]    [archives]
+              ┌──────────┬──────────┬─────────┴────────┬──────────┬──────────┐
+              ↓          ↓          ↓                  ↓          ↓          ↓
+        bgp-radar    RIPE Stat   rpki-client       Globalping  Monocle   CAIDA
+        [realtime]  [state/hist] [ASPA+ROA]        [probing]   [AS rel]  [AS rel]
 ```
 
 ## Data Sources
 
-| Source | Type | Data Provided |
-|--------|------|---------------|
-| **RIPE Stat** | REST API | Current BGP state, routing history, RPKI validation |
-| **bgp-radar** | Subprocess | Real-time anomaly detection (hijacks, leaks, blackholes) |
-| **Globalping** | REST API | Global ping, traceroute, MTR, DNS measurements |
-| **PeeringDB** | CAIDA dump | Network info, IXP presence, NOC contacts |
-| **Monocle** | CLI | AS relationships (peers, upstreams, downstreams) from BGP data |
-| **BGPStream** | Library | Historical BGP data from RouteViews and RIPE RIS |
+| Source | Type | Data Provided | Auth |
+|--------|------|---------------|------|
+| **RIPE Stat** | REST API | Current BGP state, routing history, RPKI validation | Free, no key |
+| **rpki-client console** | REST API | Validated ROA (~825K) + ASPA (~1,472) objects from global RPKI | Free, no key |
+| **CAIDA Relationships** | HTTP | Inferred AS relationships (provider-customer, peering) | Free, no key |
+| **bgp-radar** | Subprocess | Real-time anomaly detection (hijacks, leaks, blackholes) | Local binary |
+| **Globalping** | REST API | Global ping, traceroute, MTR, DNS measurements | Free tier |
+| **PeeringDB** | CAIDA dump | Network info, IXP presence, NOC contacts | Free, no key |
+| **Monocle** | CLI | AS relationships (peers, upstreams, downstreams) from BGP data | Local binary |
+| **BGPStream** | Library | Historical BGP data from RouteViews and RIPE RIS | Free, no key |
 
 ## Development
 
