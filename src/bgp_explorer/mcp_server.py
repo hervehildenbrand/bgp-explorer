@@ -3211,6 +3211,8 @@ async def validate_prefix_routes(
 
     Data sources: RIPE Stat (routes + ROV), rpki-client console (ASPA objects).
     """
+    import asyncio
+
     try:
         client = await get_ripe_stat()
         routes = await client.get_bgp_state(prefix)
@@ -3221,47 +3223,71 @@ async def validate_prefix_routes(
         rpki_console = await get_rpki_console()
         validator = await get_aspa_validator()
 
-        # Validate each route
+        # Pre-compute ROV for this prefix (same for all routes with same prefix)
+        roa_cache: dict[str, list] = {}
+        if rpki_console is not None:
+            roa_cache[prefix] = await rpki_console.get_roas_for_prefix(prefix)
+        prefix_len = int(prefix.split("/")[1]) if "/" in prefix else 0
+
+        # Deduplicate paths for ASPA validation (many routes share same AS path)
+        unique_paths: dict[str, str] = {}  # "asn1 asn2 asn3" -> aspa_status
+
+        async def validate_path_cached(as_path: list[int]) -> str:
+            path_key = " ".join(str(a) for a in as_path)
+            if path_key in unique_paths:
+                return unique_paths[path_key]
+            if validator is not None and len(as_path) >= 2:
+                try:
+                    result = await validator.validate_path(as_path)
+                    status = result.state.value
+                except Exception:
+                    status = "unknown"
+            elif len(as_path) < 2:
+                status = "unverifiable"
+            else:
+                status = "unknown"
+            unique_paths[path_key] = status
+            return status
+
+        # Validate unique paths first (much faster than per-route)
+        unique_as_paths = {tuple(r.as_path) for r in routes}
+        semaphore = asyncio.Semaphore(20)
+
+        async def validate_one(path_tuple: tuple[int, ...]) -> None:
+            async with semaphore:
+                await validate_path_cached(list(path_tuple))
+
+        await asyncio.gather(*(validate_one(p) for p in unique_as_paths))
+
+        # Now build results using cached data
         rov_stats = {"valid": 0, "invalid": 0, "unknown": 0}
         aspa_stats = {"valid": 0, "invalid": 0, "unknown": 0, "unverifiable": 0}
         route_details: list[dict] = []
 
         for route in routes:
-            # ROV validation
+            # ROV validation (uses pre-fetched ROA data)
             rov_status = "unknown"
-            if rpki_console is not None:
-                roas = await rpki_console.get_roas_for_prefix(route.prefix)
-                if roas:
-                    origin_match = any(r.origin_asn == route.origin_asn for r in roas)
-                    length_ok = any(
-                        r.origin_asn == route.origin_asn
-                        and int(route.prefix.split("/")[1]) <= r.max_length
-                        for r in roas
-                    )
-                    if origin_match and length_ok:
-                        rov_status = "valid"
-                    else:
-                        rov_status = "invalid"
-                # else: no ROA → unknown
+            roas = roa_cache.get(route.prefix, [])
+            if roas:
+                origin_match = any(r.origin_asn == route.origin_asn for r in roas)
+                length_ok = any(
+                    r.origin_asn == route.origin_asn and prefix_len <= r.max_length for r in roas
+                )
+                if origin_match and length_ok:
+                    rov_status = "valid"
+                else:
+                    rov_status = "invalid"
             rov_stats[rov_status] += 1
 
-            # ASPA validation
-            aspa_status = "unknown"
-            if validator is not None and len(route.as_path) >= 2:
-                try:
-                    result = await validator.validate_path(route.as_path)
-                    aspa_status = result.state.value
-                except Exception:
-                    aspa_status = "unknown"
-            elif len(route.as_path) < 2:
-                aspa_status = "unverifiable"
-            aspa_stats.get(aspa_status, None)
+            # ASPA validation (uses cached path results)
+            path_key = " ".join(str(a) for a in route.as_path)
+            aspa_status = unique_paths.get(path_key, "unknown")
             if aspa_status in aspa_stats:
                 aspa_stats[aspa_status] += 1
 
             route_details.append(
                 {
-                    "path": " ".join(str(a) for a in route.as_path),
+                    "path": path_key,
                     "origin": route.origin_asn,
                     "rov": rov_status,
                     "aspa": aspa_status,
