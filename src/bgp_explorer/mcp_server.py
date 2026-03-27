@@ -68,6 +68,7 @@ Key guidelines:
 - For ASPA status (published ASPA objects), use get_aspa_status
 - For ROA guidance (missing ROAs, maxLength issues), use get_roa_guidance
 - For ASPA guidance (recommended provider set), use get_aspa_guidance
+- For combined ROV+ASPA per-route validation, use validate_prefix_routes
 - For looking glass queries (vantage point routing), use query_looking_glass
 """,
 )
@@ -3188,6 +3189,193 @@ async def get_aspa_guidance(
 
     except Exception as e:
         return f"Error generating ASPA guidance for AS{asn}: {e}"
+
+
+@mcp.tool()
+async def validate_prefix_routes(
+    prefix: Annotated[
+        str,
+        Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')"),
+    ],
+) -> str:
+    """Validate all routes for a prefix with combined ROV + ASPA status.
+
+    For each observed route to the prefix, validates:
+    - **ROV**: Is the origin ASN authorized by a ROA? (valid/invalid/unknown)
+    - **ASPA**: Does the AS path comply with published ASPA objects? (valid/invalid/unknown)
+
+    Produces per-route tags and aggregate statistics, similar to bgproutes.io.
+
+    This is the most comprehensive single-prefix security analysis tool,
+    combining origin validation (ROV) with path validation (ASPA).
+
+    Data sources: RIPE Stat (routes + ROV), rpki-client console (ASPA objects).
+    """
+    try:
+        client = await get_ripe_stat()
+        routes = await client.get_bgp_state(prefix)
+
+        if not routes:
+            return f"No routes found for {prefix}."
+
+        rpki_console = await get_rpki_console()
+        validator = await get_aspa_validator()
+
+        # Validate each route
+        rov_stats = {"valid": 0, "invalid": 0, "unknown": 0}
+        aspa_stats = {"valid": 0, "invalid": 0, "unknown": 0, "unverifiable": 0}
+        route_details: list[dict] = []
+
+        for route in routes:
+            # ROV validation
+            rov_status = "unknown"
+            if rpki_console is not None:
+                roas = await rpki_console.get_roas_for_prefix(route.prefix)
+                if roas:
+                    origin_match = any(r.origin_asn == route.origin_asn for r in roas)
+                    length_ok = any(
+                        r.origin_asn == route.origin_asn
+                        and int(route.prefix.split("/")[1]) <= r.max_length
+                        for r in roas
+                    )
+                    if origin_match and length_ok:
+                        rov_status = "valid"
+                    else:
+                        rov_status = "invalid"
+                # else: no ROA → unknown
+            rov_stats[rov_status] += 1
+
+            # ASPA validation
+            aspa_status = "unknown"
+            if validator is not None and len(route.as_path) >= 2:
+                try:
+                    result = await validator.validate_path(route.as_path)
+                    aspa_status = result.state.value
+                except Exception:
+                    aspa_status = "unknown"
+            elif len(route.as_path) < 2:
+                aspa_status = "unverifiable"
+            aspa_stats.get(aspa_status, None)
+            if aspa_status in aspa_stats:
+                aspa_stats[aspa_status] += 1
+
+            route_details.append(
+                {
+                    "path": " ".join(str(a) for a in route.as_path),
+                    "origin": route.origin_asn,
+                    "rov": rov_status,
+                    "aspa": aspa_status,
+                    "collector": route.collector or "",
+                }
+            )
+
+        total = len(routes)
+        origin_asn = routes[0].origin_asn
+
+        # Build output
+        summary = [
+            f"**ROV + ASPA Validation: {prefix}**",
+            f"**Origin:** AS{origin_asn}",
+            f"**Total routes analyzed:** {total}",
+            "",
+        ]
+
+        # ROV stats
+        summary.append("**ROV (Route Origin Validation):**")
+        for status in ["valid", "invalid", "unknown"]:
+            count = rov_stats[status]
+            pct = count / total * 100 if total else 0
+            label = {"valid": "Valid", "invalid": "INVALID", "unknown": "Unknown (no ROA)"}[status]
+            summary.append(f"  - {label}: {count} ({pct:.1f}%)")
+
+        summary.append("")
+
+        # ASPA stats
+        summary.append("**ASPA (Path Authorization):**")
+        for status in ["valid", "invalid", "unknown", "unverifiable"]:
+            count = aspa_stats[status]
+            if count == 0:
+                continue
+            pct = count / total * 100 if total else 0
+            label = {
+                "valid": "Valid",
+                "invalid": "INVALID",
+                "unknown": "Unknown",
+                "unverifiable": "Unverifiable",
+            }[status]
+            summary.append(f"  - {label}: {count} ({pct:.1f}%)")
+
+        summary.append("")
+
+        # ASPA object status for origin
+        if rpki_console is not None:
+            has_aspa = await rpki_console.has_aspa(origin_asn)
+            if has_aspa:
+                aspa_obj = await rpki_console.get_aspa_object(origin_asn)
+                if aspa_obj:
+                    providers = ", ".join(f"AS{p}" for p in sorted(aspa_obj.provider_asns))
+                    summary.append(
+                        f"**Origin ASPA:** AS{origin_asn} has published ASPA "
+                        f"(providers: {providers})"
+                    )
+            else:
+                summary.append(f"**Origin ASPA:** AS{origin_asn} has NOT published ASPA objects")
+            summary.append("")
+
+        # Show sample routes (first 10 with most interesting status)
+        # Prioritize invalid routes
+        invalid_routes = [
+            r for r in route_details if r["rov"] == "invalid" or r["aspa"] == "invalid"
+        ]
+        valid_routes = [r for r in route_details if r["rov"] == "valid" and r["aspa"] == "valid"]
+        other_routes = [
+            r for r in route_details if r not in invalid_routes and r not in valid_routes
+        ]
+
+        sample = invalid_routes[:5] + valid_routes[:3] + other_routes[:2]
+
+        if sample:
+            summary.append("**Sample Routes:**")
+            for r in sample:
+                rov_tag = {
+                    "valid": "ROV:Valid",
+                    "invalid": "ROV:INVALID",
+                    "unknown": "ROV:Unknown",
+                }[r["rov"]]
+                aspa_tag = {
+                    "valid": "ASPA:Valid",
+                    "invalid": "ASPA:INVALID",
+                    "unknown": "ASPA:Unknown",
+                    "unverifiable": "ASPA:Unverifiable",
+                }.get(r["aspa"], f"ASPA:{r['aspa']}")
+                summary.append(f"  - [{rov_tag}] [{aspa_tag}] path: {r['path']}")
+
+        # Security assessment
+        summary.append("")
+        rov_invalid_pct = rov_stats["invalid"] / total * 100 if total else 0
+        aspa_invalid_pct = aspa_stats["invalid"] / total * 100 if total else 0
+
+        if rov_invalid_pct > 0 or aspa_invalid_pct > 0:
+            summary.append("**Security Concerns:**")
+            if rov_invalid_pct > 0:
+                summary.append(
+                    f"  - {rov_stats['invalid']} routes ({rov_invalid_pct:.1f}%) have "
+                    f"INVALID ROV status — potential hijack or misconfiguration"
+                )
+            if aspa_invalid_pct > 0:
+                summary.append(
+                    f"  - {aspa_stats['invalid']} routes ({aspa_invalid_pct:.1f}%) have "
+                    f"INVALID ASPA status — potential route leak"
+                )
+        else:
+            summary.append(
+                "**No security concerns detected.** All routes pass ROV and ASPA checks."
+            )
+
+        return "\n".join(summary)
+
+    except Exception as e:
+        return f"Error validating routes for {prefix}: {e}"
 
 
 # =============================================================================
