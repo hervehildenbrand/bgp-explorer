@@ -2812,6 +2812,15 @@ async def run_compliance_audit(
         except Exception:
             logger.debug("Could not fetch ROV data for AS%d", asn)
 
+        # --- Check ASPA status (optional) ---
+        has_aspa: bool | None = None
+        try:
+            rpki_console = await get_rpki_console()
+            if rpki_console is not None:
+                has_aspa = await rpki_console.has_aspa(asn)
+        except Exception:
+            logger.debug("Could not check ASPA status for AS%d", asn)
+
         # --- Run audit ---
         auditor = get_compliance_auditor()
         fw = framework.lower()
@@ -2819,7 +2828,7 @@ async def run_compliance_audit(
         if fw == "dora":
             report = auditor.audit_dora(
                 asn, resilience_report, stability_report, rov_report,
-                rpki_coverage=rpki_coverage,
+                rpki_coverage=rpki_coverage, has_aspa=has_aspa,
             )
             if output_format == "json":
                 import json
@@ -2829,7 +2838,7 @@ async def run_compliance_audit(
         elif fw == "nis2":
             report = auditor.audit_nis2(
                 asn, resilience_report, stability_report, rov_report,
-                rpki_coverage=rpki_coverage,
+                rpki_coverage=rpki_coverage, has_aspa=has_aspa,
             )
             if output_format == "json":
                 import json
@@ -2839,7 +2848,7 @@ async def run_compliance_audit(
         else:  # "both"
             dora_report, nis2_report = auditor.audit_both(
                 asn, resilience_report, stability_report, rov_report,
-                rpki_coverage=rpki_coverage,
+                rpki_coverage=rpki_coverage, has_aspa=has_aspa,
             )
             if output_format == "json":
                 import json

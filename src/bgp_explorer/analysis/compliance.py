@@ -151,10 +151,11 @@ class ComplianceAuditor:
         rov_report: ROVCoverageReport | None = None,
         contacts: dict | None = None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceAuditReport:
         categories = [
             self._check_dora_ict_risk(
-                resilience_report, stability_report, rov_report, rpki_coverage
+                resilience_report, stability_report, rov_report, rpki_coverage, has_aspa
             ),
             self._check_dora_third_party(resilience_report),
             self._check_dora_incident_mgmt(stability_report, contacts),
@@ -169,10 +170,11 @@ class ComplianceAuditor:
         rov_report: ROVCoverageReport | None = None,
         aspa_results: list[dict] | None = None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceAuditReport:
         categories = [
             self._check_nis2_risk_mgmt(
-                resilience_report, rov_report, aspa_results, rpki_coverage
+                resilience_report, rov_report, aspa_results, rpki_coverage, has_aspa
             ),
             self._check_nis2_incident_reporting(stability_report),
         ]
@@ -187,12 +189,13 @@ class ComplianceAuditor:
         aspa_results: list[dict] | None = None,
         contacts: dict | None = None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> tuple[ComplianceAuditReport, ComplianceAuditReport]:
         dora = self.audit_dora(
-            asn, resilience_report, stability_report, rov_report, contacts, rpki_coverage
+            asn, resilience_report, stability_report, rov_report, contacts, rpki_coverage, has_aspa
         )
         nis2 = self.audit_nis2(
-            asn, resilience_report, stability_report, rov_report, aspa_results, rpki_coverage
+            asn, resilience_report, stability_report, rov_report, aspa_results, rpki_coverage, has_aspa
         )
         return dora, nis2
 
@@ -307,6 +310,7 @@ class ComplianceAuditor:
         stability: StabilityReport | None,
         rov: ROVCoverageReport | None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceCategoryReport:
         findings: list[ComplianceFinding] = []
 
@@ -413,6 +417,32 @@ class ComplianceAuditor:
                 ),
                 data_source="rov_coverage",
             ))
+
+        # ASPA deployment (MEDIUM — recommended, not yet mandatory)
+        if has_aspa is not None:
+            if has_aspa:
+                findings.append(ComplianceFinding(
+                    article="Art. 9(2)",
+                    requirement="ASPA deployment for path authorization",
+                    status=ComplianceLevel.COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence="ASPA object published — route leak protection enabled",
+                    recommendation="",
+                    data_source="rpki_aspa",
+                ))
+            else:
+                findings.append(ComplianceFinding(
+                    article="Art. 9(2)",
+                    requirement="ASPA deployment for path authorization",
+                    status=ComplianceLevel.PARTIAL,
+                    severity=Severity.MEDIUM,
+                    evidence="No ASPA object published — no path-level route leak protection",
+                    recommendation=(
+                        "Publish an ASPA object at your RIR portal to authorize upstream "
+                        "providers and protect against route leaks"
+                    ),
+                    data_source="rpki_aspa",
+                ))
 
         # Route instability (MEDIUM)
         if stability is not None:
@@ -579,6 +609,7 @@ class ComplianceAuditor:
         rov: ROVCoverageReport | None,
         aspa_results: list[dict] | None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceCategoryReport:
         findings: list[ComplianceFinding] = []
 
@@ -691,6 +722,32 @@ class ComplianceAuditor:
                     evidence=f"{len(invalid_paths)} invalid AS paths detected via ASPA validation",
                     recommendation="Investigate and remediate invalid routing paths",
                     data_source="aspa",
+                ))
+
+        # ASPA deployment for routing security (MEDIUM — recommended)
+        if has_aspa is not None:
+            if has_aspa:
+                findings.append(ComplianceFinding(
+                    article="Art. 21(2)(e)",
+                    requirement="Routing security — ASPA deployment",
+                    status=ComplianceLevel.COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence="ASPA object published — route leak protection enabled via RPKI",
+                    recommendation="",
+                    data_source="rpki_aspa",
+                ))
+            else:
+                findings.append(ComplianceFinding(
+                    article="Art. 21(2)(e)",
+                    requirement="Routing security — ASPA deployment",
+                    status=ComplianceLevel.PARTIAL,
+                    severity=Severity.MEDIUM,
+                    evidence="No ASPA object published — no cryptographic route leak protection",
+                    recommendation=(
+                        "Publish an ASPA object at your RIR portal to complement "
+                        "ROA-based origin validation with path-level authorization"
+                    ),
+                    data_source="rpki_aspa",
                 ))
 
         # Routing security — ROA deployment (HIGH)
