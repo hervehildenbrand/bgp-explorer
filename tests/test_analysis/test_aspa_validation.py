@@ -23,27 +23,43 @@ def _make_relationship(asn1: int, asn2: int, rel_type: str) -> ASRelationship:
     """Create an ASRelationship with the right percentages for the given type."""
     if rel_type == "upstream":
         return ASRelationship(
-            asn1=asn1, asn2=asn2, asn2_name=None,
-            connected_pct=80.0, peer_pct=0.0,
-            as1_upstream_pct=0.0, as2_upstream_pct=80.0,
+            asn1=asn1,
+            asn2=asn2,
+            asn2_name=None,
+            connected_pct=80.0,
+            peer_pct=0.0,
+            as1_upstream_pct=0.0,
+            as2_upstream_pct=80.0,
         )
     elif rel_type == "downstream":
         return ASRelationship(
-            asn1=asn1, asn2=asn2, asn2_name=None,
-            connected_pct=80.0, peer_pct=0.0,
-            as1_upstream_pct=80.0, as2_upstream_pct=0.0,
+            asn1=asn1,
+            asn2=asn2,
+            asn2_name=None,
+            connected_pct=80.0,
+            peer_pct=0.0,
+            as1_upstream_pct=80.0,
+            as2_upstream_pct=0.0,
         )
     elif rel_type == "peer":
         return ASRelationship(
-            asn1=asn1, asn2=asn2, asn2_name=None,
-            connected_pct=80.0, peer_pct=50.0,
-            as1_upstream_pct=10.0, as2_upstream_pct=10.0,
+            asn1=asn1,
+            asn2=asn2,
+            asn2_name=None,
+            connected_pct=80.0,
+            peer_pct=50.0,
+            as1_upstream_pct=10.0,
+            as2_upstream_pct=10.0,
         )
     # unknown
     return ASRelationship(
-        asn1=asn1, asn2=asn2, asn2_name=None,
-        connected_pct=10.0, peer_pct=0.0,
-        as1_upstream_pct=5.0, as2_upstream_pct=5.0,
+        asn1=asn1,
+        asn2=asn2,
+        asn2_name=None,
+        connected_pct=10.0,
+        peer_pct=0.0,
+        as1_upstream_pct=5.0,
+        as2_upstream_pct=5.0,
     )
 
 
@@ -95,10 +111,12 @@ class TestASPAValidator:
         """Path where all hops are authorized should be VALID."""
         # Path: 13335 -> 174 -> 15169
         # 13335 has provider 174, 174 has provider 15169
-        provider = FakeASPAProvider({
-            13335: [174],
-            174: [15169],
-        })
+        provider = FakeASPAProvider(
+            {
+                13335: [174],
+                174: [15169],
+            }
+        )
         validator = ASPAValidator(provider)
         result = await validator.validate_path([13335, 174, 15169])
 
@@ -113,10 +131,12 @@ class TestASPAValidator:
     async def test_unauthorized_hop(self):
         """Path with an unauthorized hop should be INVALID."""
         # 13335 has provider 174, but 174 does NOT have 666 as provider
-        provider = FakeASPAProvider({
-            13335: [174],
-            174: [3356],  # 666 not in the list
-        })
+        provider = FakeASPAProvider(
+            {
+                13335: [174],
+                174: [3356],  # 666 not in the list
+            }
+        )
         validator = ASPAValidator(provider)
         result = await validator.validate_path([13335, 174, 666])
 
@@ -128,10 +148,12 @@ class TestASPAValidator:
     async def test_unknown_hop(self):
         """Path with unknown relationships should be UNKNOWN."""
         # 13335 has provider 174, but 999 has no data
-        provider = FakeASPAProvider({
-            13335: [174],
-            # 174 not in map → returns None
-        })
+        provider = FakeASPAProvider(
+            {
+                13335: [174],
+                # 174 not in map → returns None
+            }
+        )
         validator = ASPAValidator(provider)
         result = await validator.validate_path([13335, 174, 15169])
 
@@ -140,10 +162,12 @@ class TestASPAValidator:
     @pytest.mark.asyncio
     async def test_prepending_handled(self):
         """AS path prepending should be removed before validation."""
-        provider = FakeASPAProvider({
-            13335: [174],
-            174: [15169],
-        })
+        provider = FakeASPAProvider(
+            {
+                13335: [174],
+                174: [15169],
+            }
+        )
         validator = ASPAValidator(provider)
         result = await validator.validate_path([13335, 13335, 174, 174, 174, 15169])
 
@@ -157,10 +181,12 @@ class TestASPAValidator:
         # Build provider: 13335 has downstream 174 (13335 is provider of 174)
         # Then 174 has upstream 15169
         # So path goes: 13335 (down to) 174 (up to) 15169 — valley!
-        provider = FakeASPAProvider({
-            13335: [],       # no upstreams (it IS the provider)
-            174: [15169],    # 15169 is upstream of 174
-        })
+        provider = FakeASPAProvider(
+            {
+                13335: [],  # no upstreams (it IS the provider)
+                174: [15169],  # 15169 is upstream of 174
+            }
+        )
         validator = ASPAValidator(provider)
 
         # We need 13335->174 to be "downstream" direction
@@ -200,16 +226,28 @@ class TestASPAValidator:
         # The peer hop between two Tier-1s should be neutral
         hops = [
             ASPAHopResult(
-                asn=65000, next_asn=3356, is_authorized_provider=True,
-                relationship_type="upstream", data_source="fake", confidence=0.7,
+                asn=65000,
+                next_asn=3356,
+                is_authorized_provider=True,
+                relationship_type="upstream",
+                data_source="fake",
+                confidence=0.7,
             ),
             ASPAHopResult(
-                asn=3356, next_asn=1299, is_authorized_provider=False,
-                relationship_type="peer-or-lateral", data_source="fake", confidence=0.7,
+                asn=3356,
+                next_asn=1299,
+                is_authorized_provider=False,
+                relationship_type="peer-or-lateral",
+                data_source="fake",
+                confidence=0.7,
             ),
             ASPAHopResult(
-                asn=1299, next_asn=65001, is_authorized_provider=False,
-                relationship_type="downstream", data_source="fake", confidence=0.7,
+                asn=1299,
+                next_asn=65001,
+                is_authorized_provider=False,
+                relationship_type="downstream",
+                data_source="fake",
+                confidence=0.7,
             ),
         ]
         # With Tier-1 peering treated as neutral, the uphill->peer->downhill is valid
@@ -221,12 +259,20 @@ class TestASPAValidator:
 
         hops = [
             ASPAHopResult(
-                asn=65000, next_asn=65001, is_authorized_provider=False,
-                relationship_type="peer-or-lateral", data_source="fake", confidence=0.7,
+                asn=65000,
+                next_asn=65001,
+                is_authorized_provider=False,
+                relationship_type="peer-or-lateral",
+                data_source="fake",
+                confidence=0.7,
             ),
             ASPAHopResult(
-                asn=65001, next_asn=65002, is_authorized_provider=True,
-                relationship_type="upstream", data_source="fake", confidence=0.7,
+                asn=65001,
+                next_asn=65002,
+                is_authorized_provider=True,
+                relationship_type="upstream",
+                data_source="fake",
+                confidence=0.7,
             ),
         ]
         # Non-Tier-1 peer sets went_down, so upstream after that is a valley
@@ -238,12 +284,20 @@ class TestASPAValidator:
 
         hops = [
             ASPAHopResult(
-                asn=3356, next_asn=2914, is_authorized_provider=False,
-                relationship_type="peer-or-lateral", data_source="fake", confidence=0.7,
+                asn=3356,
+                next_asn=2914,
+                is_authorized_provider=False,
+                relationship_type="peer-or-lateral",
+                data_source="fake",
+                confidence=0.7,
             ),
             ASPAHopResult(
-                asn=2914, next_asn=65000, is_authorized_provider=False,
-                relationship_type="downstream", data_source="fake", confidence=0.7,
+                asn=2914,
+                next_asn=65000,
+                is_authorized_provider=False,
+                relationship_type="downstream",
+                data_source="fake",
+                confidence=0.7,
             ),
         ]
         # Tier-1 peering is neutral, downstream after is fine
@@ -255,12 +309,14 @@ class TestASPAValidator:
         # Path: 65000 -> 3356 (Tier-1) -> 1299 (Tier-1) -> 65001
         # 65000 has 3356 as provider, 65001 has 1299 as provider
         # 3356 and 1299 are peers (neither is provider of the other)
-        provider = FakeASPAProvider({
-            65000: [3356],
-            3356: [],      # Tier-1, no upstream
-            1299: [],      # Tier-1, no upstream
-            65001: [1299],
-        })
+        provider = FakeASPAProvider(
+            {
+                65000: [3356],
+                3356: [],  # Tier-1, no upstream
+                1299: [],  # Tier-1, no upstream
+                65001: [1299],
+            }
+        )
         validator = ASPAValidator(provider)
         result = await validator.validate_path([65000, 3356, 1299, 65001])
 
@@ -280,10 +336,12 @@ class TestMonocleASPAProvider:
     async def test_get_authorized_providers(self):
         """Should return upstream ASNs from Monocle."""
         monocle = AsyncMock()
-        monocle.get_as_upstreams = AsyncMock(return_value=[
-            _make_relationship(13335, 174, "upstream"),
-            _make_relationship(13335, 3356, "upstream"),
-        ])
+        monocle.get_as_upstreams = AsyncMock(
+            return_value=[
+                _make_relationship(13335, 174, "upstream"),
+                _make_relationship(13335, 3356, "upstream"),
+            ]
+        )
 
         provider = MonocleASPAProvider(monocle)
         providers = await provider.get_authorized_providers(13335)
@@ -295,9 +353,11 @@ class TestMonocleASPAProvider:
     async def test_get_authorized_providers_caching(self):
         """Second call should use cache, not call Monocle again."""
         monocle = AsyncMock()
-        monocle.get_as_upstreams = AsyncMock(return_value=[
-            _make_relationship(13335, 174, "upstream"),
-        ])
+        monocle.get_as_upstreams = AsyncMock(
+            return_value=[
+                _make_relationship(13335, 174, "upstream"),
+            ]
+        )
 
         provider = MonocleASPAProvider(monocle)
         await provider.get_authorized_providers(13335)
@@ -309,9 +369,11 @@ class TestMonocleASPAProvider:
     async def test_is_authorized_provider_true(self):
         """Known upstream should return True."""
         monocle = AsyncMock()
-        monocle.get_as_upstreams = AsyncMock(return_value=[
-            _make_relationship(13335, 174, "upstream"),
-        ])
+        monocle.get_as_upstreams = AsyncMock(
+            return_value=[
+                _make_relationship(13335, 174, "upstream"),
+            ]
+        )
 
         provider = MonocleASPAProvider(monocle)
         result = await provider.is_authorized_provider(13335, 174)
@@ -321,9 +383,11 @@ class TestMonocleASPAProvider:
     async def test_is_authorized_provider_false(self):
         """Known ASN without the provider in its upstreams should return False."""
         monocle = AsyncMock()
-        monocle.get_as_upstreams = AsyncMock(return_value=[
-            _make_relationship(13335, 174, "upstream"),
-        ])
+        monocle.get_as_upstreams = AsyncMock(
+            return_value=[
+                _make_relationship(13335, 174, "upstream"),
+            ]
+        )
 
         provider = MonocleASPAProvider(monocle)
         result = await provider.is_authorized_provider(13335, 666)

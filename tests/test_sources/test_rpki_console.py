@@ -15,9 +15,27 @@ SAMPLE_RPKI_JSON = {
         "aspas": 2,
     },
     "roas": [
-        {"asn": 13335, "prefix": "1.0.0.0/24", "maxLength": 24, "ta": "apnic", "expires": 1775000000},
-        {"asn": 13335, "prefix": "1.1.1.0/24", "maxLength": 24, "ta": "apnic", "expires": 1775000000},
-        {"asn": 15169, "prefix": "8.8.8.0/24", "maxLength": 24, "ta": "arin", "expires": 1775000000},
+        {
+            "asn": 13335,
+            "prefix": "1.0.0.0/24",
+            "maxLength": 24,
+            "ta": "apnic",
+            "expires": 1775000000,
+        },
+        {
+            "asn": 13335,
+            "prefix": "1.1.1.0/24",
+            "maxLength": 24,
+            "ta": "apnic",
+            "expires": 1775000000,
+        },
+        {
+            "asn": 15169,
+            "prefix": "8.8.8.0/24",
+            "maxLength": 24,
+            "ta": "arin",
+            "expires": 1775000000,
+        },
     ],
     "aspas": [
         {"customer_asid": 64496, "providers": [174, 3356], "expires": 1775000000},

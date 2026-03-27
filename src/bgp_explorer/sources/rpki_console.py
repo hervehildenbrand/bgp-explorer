@@ -46,9 +46,7 @@ class RpkiConsoleClient(DataSource):
 
     async def connect(self) -> None:
         if self._session is None:
-            self._session = aiohttp.ClientSession(
-                headers={"User-Agent": USER_AGENT}
-            )
+            self._session = aiohttp.ClientSession(headers={"User-Agent": USER_AGENT})
 
     async def disconnect(self) -> None:
         if self._session is not None:
@@ -98,24 +96,28 @@ class RpkiConsoleClient(DataSource):
             customer = entry.get("customer_asid")
             providers = entry.get("providers", [])
             if customer is not None:
-                aspas.append(ASPAObject(
-                    customer_asn=int(customer),
-                    provider_asns=frozenset(int(p) for p in providers),
-                    expires=entry.get("expires", 0),
-                ))
+                aspas.append(
+                    ASPAObject(
+                        customer_asn=int(customer),
+                        provider_asns=frozenset(int(p) for p in providers),
+                        expires=entry.get("expires", 0),
+                    )
+                )
 
         roas = []
         for entry in data.get("roas", []):
             prefix = entry.get("prefix")
             asn = entry.get("asn")
             if prefix is not None and asn is not None:
-                roas.append(ROAObject(
-                    prefix=prefix,
-                    max_length=entry.get("maxLength", 0),
-                    origin_asn=int(asn),
-                    trust_anchor=entry.get("ta", ""),
-                    expires=entry.get("expires", 0),
-                ))
+                roas.append(
+                    ROAObject(
+                        prefix=prefix,
+                        max_length=entry.get("maxLength", 0),
+                        origin_asn=int(asn),
+                        trust_anchor=entry.get("ta", ""),
+                        expires=entry.get("expires", 0),
+                    )
+                )
 
         return RPKIDump(
             roas=roas,

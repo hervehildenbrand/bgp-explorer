@@ -264,9 +264,9 @@ class ASPAValidator:
 
     # Confidence scores by data source type
     CONFIDENCE_SCORES: dict[str, float] = {
-        "rpki-aspa": 1.0,       # Cryptographically signed ASPA objects
-        "caida": 0.8,           # Inferred from observed BGP data (monthly)
-        "monocle": 0.7,         # Inferred from observed BGP data (on-demand)
+        "rpki-aspa": 1.0,  # Cryptographically signed ASPA objects
+        "caida": 0.8,  # Inferred from observed BGP data (monthly)
+        "monocle": 0.7,  # Inferred from observed BGP data (on-demand)
     }
 
     async def _validate_hop(self, asn: int, next_asn: int) -> ASPAHopResult:
@@ -304,8 +304,23 @@ class ASPAValidator:
     # Well-known Tier-1 transit-free ASNs whose inter-provider peering is
     # expected and should not trigger valley-free violations.
     TIER1_ASNS: set[int] = {
-        174, 209, 286, 701, 1239, 1299, 2914, 3257, 3320, 3356,
-        5511, 6453, 6461, 6762, 6830, 7018, 12956,
+        174,
+        209,
+        286,
+        701,
+        1239,
+        1299,
+        2914,
+        3257,
+        3320,
+        3356,
+        5511,
+        6453,
+        6461,
+        6762,
+        6830,
+        7018,
+        12956,
     }
 
     @staticmethod

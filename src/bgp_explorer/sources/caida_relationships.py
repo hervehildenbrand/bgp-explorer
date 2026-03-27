@@ -49,9 +49,7 @@ class CAIDARelationshipsClient(DataSource):
 
     async def connect(self) -> None:
         if self._session is None:
-            self._session = aiohttp.ClientSession(
-                headers={"User-Agent": USER_AGENT}
-            )
+            self._session = aiohttp.ClientSession(headers={"User-Agent": USER_AGENT})
 
     async def disconnect(self) -> None:
         if self._session is not None:

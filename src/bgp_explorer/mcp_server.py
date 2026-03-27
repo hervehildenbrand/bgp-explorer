@@ -361,7 +361,9 @@ async def lookup_prefix(
                     " For IPv6, many networks announce more-specific prefixes"
                     " (e.g., /48s) instead of the aggregate block."
                 )
-            msg += " Try using get_asn_announcements to see what prefixes an ASN actually announces."
+            msg += (
+                " Try using get_asn_announcements to see what prefixes an ASN actually announces."
+            )
             return msg
 
         origin_asns = set(r.origin_asn for r in routes)
@@ -552,9 +554,7 @@ async def get_routing_history(
 
 @mcp.tool()
 async def get_bgp_path_history(
-    prefix: Annotated[
-        str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")
-    ],
+    prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")],
     start_date: Annotated[str, Field(description="Start date in ISO format (YYYY-MM-DD)")],
     end_date: Annotated[str, Field(description="End date in ISO format (YYYY-MM-DD)")],
 ) -> str:
@@ -644,7 +644,9 @@ async def get_bgp_path_history(
 
             if unique_paths_in_events:
                 summary.append("")
-                summary.append(f"**Unique paths observed in changes:** {len(unique_paths_in_events)}")
+                summary.append(
+                    f"**Unique paths observed in changes:** {len(unique_paths_in_events)}"
+                )
                 upstream_asns: set[int] = set()
                 for path in unique_paths_in_events:
                     if len(path) >= 2:
@@ -770,12 +772,14 @@ async def check_rpki_for_asn(
                     bucket = status if status in results else "not-found"
                     results[bucket].append(detail)
                 except Exception:
-                    results["not-found"].append({
-                        "status": "not-found",
-                        "prefix": prefix,
-                        "origin_asn": asn,
-                        "validating_roas": [],
-                    })
+                    results["not-found"].append(
+                        {
+                            "status": "not-found",
+                            "prefix": prefix,
+                            "origin_asn": asn,
+                            "validating_roas": [],
+                        }
+                    )
 
         await asyncio.gather(*(check_one(p) for p in prefixes))
 
@@ -819,7 +823,9 @@ async def check_rpki_for_asn(
 
         coverage = len(results["valid"]) + len(results["invalid"])
         coverage_pct = (coverage / len(prefixes) * 100) if prefixes else 0
-        summary.append(f"**RPKI coverage:** {coverage_pct:.1f}% ({coverage}/{len(prefixes)} prefixes have ROAs)")
+        summary.append(
+            f"**RPKI coverage:** {coverage_pct:.1f}% ({coverage}/{len(prefixes)} prefixes have ROAs)"
+        )
 
         # Add ASPA status
         try:
@@ -831,7 +837,9 @@ async def check_rpki_for_asn(
                     aspa_obj = await rpki_console.get_aspa_object(asn)
                     if aspa_obj:
                         providers_str = ", ".join(f"AS{p}" for p in sorted(aspa_obj.provider_asns))
-                        summary.append(f"**ASPA:** Published (authorized providers: {providers_str})")
+                        summary.append(
+                            f"**ASPA:** Published (authorized providers: {providers_str})"
+                        )
                 else:
                     summary.append("**ASPA:** Not published (no ASPA object found for this ASN)")
         except Exception:
@@ -1348,7 +1356,9 @@ async def get_as_upstreams(
                             f"  - AS{upstream.asn}{name_str} ({upstream.peers_percent:.1f}% visibility)"
                         )
                     summary.append("")
-                    summary.append("_Note: Data from connectivity analysis (relationship classification may differ from as2rel)._")
+                    summary.append(
+                        "_Note: Data from connectivity analysis (relationship classification may differ from as2rel)._"
+                    )
                     return "\n".join(summary)
             except Exception:
                 pass
@@ -1552,9 +1562,9 @@ async def get_as_connectivity_summary(
 
 # RFC 5737 documentation prefixes and other non-routable ranges
 _BOGON_NETWORKS = [
-    ipaddress.ip_network("192.0.2.0/24"),     # TEST-NET-1 (RFC 5737)
-    ipaddress.ip_network("198.51.100.0/24"),   # TEST-NET-2 (RFC 5737)
-    ipaddress.ip_network("203.0.113.0/24"),    # TEST-NET-3 (RFC 5737)
+    ipaddress.ip_network("192.0.2.0/24"),  # TEST-NET-1 (RFC 5737)
+    ipaddress.ip_network("198.51.100.0/24"),  # TEST-NET-2 (RFC 5737)
+    ipaddress.ip_network("203.0.113.0/24"),  # TEST-NET-3 (RFC 5737)
 ]
 
 
@@ -1843,7 +1853,9 @@ async def get_networks_at_ixp(
         networks = peeringdb.get_networks_at_ixp(ixp_id_or_name)
 
         if not networks:
-            return f"No networks found at IXP '{ixp}'. The IXP may not exist or have no participants."
+            return (
+                f"No networks found at IXP '{ixp}'. The IXP may not exist or have no participants."
+            )
 
         # Get IXP details for the header
         ixp_details = peeringdb.get_ixp_details(ixp_id_or_name)
@@ -2012,7 +2024,9 @@ async def get_network_contacts(
 
 @mcp.tool()
 async def assess_network_resilience(
-    asn: Annotated[int, Field(description="Autonomous System Number to assess (e.g., 15169 for Google)")],
+    asn: Annotated[
+        int, Field(description="Autonomous System Number to assess (e.g., 15169 for Google)")
+    ],
 ) -> str:
     """Assess network resilience and diversity for an Autonomous System.
 
@@ -2182,8 +2196,10 @@ async def verify_aspa_path(
 
         path_str = " -> ".join(f"AS{asn}" for asn in result.as_path)
         state_label = {
-            "valid": "VALID", "invalid": "INVALID",
-            "unknown": "UNKNOWN", "unverifiable": "UNVERIFIABLE",
+            "valid": "VALID",
+            "invalid": "INVALID",
+            "unknown": "UNKNOWN",
+            "unverifiable": "UNVERIFIABLE",
         }.get(result.state.value, "ERROR")
 
         summary = [
@@ -2223,9 +2239,7 @@ async def verify_aspa_path(
             summary.append("**No issues detected.** Path authorization looks good.")
 
         # Check if any hop used real ASPA data
-        has_real_aspa = any(
-            h.data_source == "rpki-aspa" for h in result.hop_results
-        )
+        has_real_aspa = any(h.data_source == "rpki-aspa" for h in result.hop_results)
         if not has_real_aspa and result.hop_results:
             summary.append("")
             summary.append(
@@ -2415,9 +2429,7 @@ async def get_prefix_stability(
         except Exception:
             pass
 
-        report = analyzer.analyze_update_activity(
-            prefix, activity_data, flap_count=flap_count
-        )
+        report = analyzer.analyze_update_activity(prefix, activity_data, flap_count=flap_count)
 
         if report.stability_score >= 8:
             score_label = "Excellent"
@@ -2446,17 +2458,13 @@ async def get_prefix_stability(
 
         if report.is_flapping:
             summary.append(
-                "**Status: FLAPPING** — This prefix is experiencing "
-                "significant route instability."
+                "**Status: FLAPPING** — This prefix is experiencing significant route instability."
             )
         elif report.is_stable:
-            summary.append(
-                "**Status: STABLE** — This prefix has minimal route changes."
-            )
+            summary.append("**Status: STABLE** — This prefix has minimal route changes.")
         else:
             summary.append(
-                "**Status: MODERATE** — Some route activity detected, "
-                "but within normal range."
+                "**Status: MODERATE** — Some route activity detected, but within normal range."
             )
 
         return "\n".join(summary)
@@ -2499,7 +2507,9 @@ async def get_bgp_update_activity(
 
         client = await get_ripe_stat()
         data = await client.get_bgp_update_activity(
-            resource, start, end,
+            resource,
+            start,
+            end,
             min_sampling_period=sampling_hours * 3600,
         )
 
@@ -2598,9 +2608,7 @@ async def analyze_rov_coverage(
                     f"[{cat}] — in {enforcer['path_count']} paths"
                 )
             if len(report.rov_enforcers_in_paths) > 10:
-                summary.append(
-                    f"  ... and {len(report.rov_enforcers_in_paths) - 10} more"
-                )
+                summary.append(f"  ... and {len(report.rov_enforcers_in_paths) - 10} more")
 
         # Add ASPA + ROA + combined analysis from rpki-client console
         try:
@@ -2622,15 +2630,23 @@ async def analyze_rov_coverage(
                     summary.append("")
                     summary.append(f"**Origin AS{origin_asn} RPKI Status:**")
                     if roa_analysis.has_roa:
-                        ml_status = "OK" if roa_analysis.max_length_ok else f"WARN: maxLength /{roa_analysis.max_length} > /{roa_analysis.prefix_length}"
-                        summary.append(f"  - ROA: {roa_analysis.rpki_status.upper()} (maxLength: {ml_status})")
+                        ml_status = (
+                            "OK"
+                            if roa_analysis.max_length_ok
+                            else f"WARN: maxLength /{roa_analysis.max_length} > /{roa_analysis.prefix_length}"
+                        )
+                        summary.append(
+                            f"  - ROA: {roa_analysis.rpki_status.upper()} (maxLength: {ml_status})"
+                        )
                     else:
                         summary.append("  - ROA: NOT FOUND (no ROA for this prefix)")
 
                     if has_aspa:
                         aspa_obj = await rpki_console.get_aspa_object(origin_asn)
                         if aspa_obj:
-                            providers_str = ", ".join(f"AS{p}" for p in sorted(aspa_obj.provider_asns))
+                            providers_str = ", ".join(
+                                f"AS{p}" for p in sorted(aspa_obj.provider_asns)
+                            )
                             summary.append(f"  - ASPA: PUBLISHED (providers: {providers_str})")
                     else:
                         summary.append("  - ASPA: NOT PUBLISHED")
@@ -2656,7 +2672,9 @@ async def analyze_rov_coverage(
 
 @mcp.tool()
 async def run_compliance_audit(
-    asn: Annotated[int, Field(description="Autonomous System Number to audit (e.g., 15169 for Google)")],
+    asn: Annotated[
+        int, Field(description="Autonomous System Number to audit (e.g., 15169 for Google)")
+    ],
     framework: Annotated[
         str,
         Field(description="Compliance framework: 'dora', 'nis2', or 'both' (default: 'both')"),
@@ -2767,13 +2785,9 @@ async def run_compliance_audit(
                 now = datetime.now(UTC)
                 start = now - timedelta(days=7)
                 first_prefix = prefixes[0]
-                activity_data = await client.get_bgp_update_activity(
-                    first_prefix, start, now
-                )
+                activity_data = await client.get_bgp_update_activity(first_prefix, start, now)
                 analyzer = get_stability_analyzer()
-                stability_report = analyzer.analyze_update_activity(
-                    first_prefix, activity_data
-                )
+                stability_report = analyzer.analyze_update_activity(first_prefix, activity_data)
         except Exception:
             logger.debug("Could not fetch stability data for AS%d", asn)
 
@@ -2806,9 +2820,7 @@ async def run_compliance_audit(
                 routes = await client.get_bgp_state(first_prefix)
                 if routes:
                     rov_analyzer = get_rov_coverage_analyzer()
-                    rov_report = rov_analyzer.analyze_prefix_coverage(
-                        first_prefix, routes
-                    )
+                    rov_report = rov_analyzer.analyze_prefix_coverage(first_prefix, routes)
         except Exception:
             logger.debug("Could not fetch ROV data for AS%d", asn)
 
@@ -2827,31 +2839,46 @@ async def run_compliance_audit(
 
         if fw == "dora":
             report = auditor.audit_dora(
-                asn, resilience_report, stability_report, rov_report,
-                rpki_coverage=rpki_coverage, has_aspa=has_aspa,
+                asn,
+                resilience_report,
+                stability_report,
+                rov_report,
+                rpki_coverage=rpki_coverage,
+                has_aspa=has_aspa,
             )
             if output_format == "json":
                 import json
+
                 return json.dumps(report.to_dict(), indent=2)
             return auditor.format_report(report)
 
         elif fw == "nis2":
             report = auditor.audit_nis2(
-                asn, resilience_report, stability_report, rov_report,
-                rpki_coverage=rpki_coverage, has_aspa=has_aspa,
+                asn,
+                resilience_report,
+                stability_report,
+                rov_report,
+                rpki_coverage=rpki_coverage,
+                has_aspa=has_aspa,
             )
             if output_format == "json":
                 import json
+
                 return json.dumps(report.to_dict(), indent=2)
             return auditor.format_report(report)
 
         else:  # "both"
             dora_report, nis2_report = auditor.audit_both(
-                asn, resilience_report, stability_report, rov_report,
-                rpki_coverage=rpki_coverage, has_aspa=has_aspa,
+                asn,
+                resilience_report,
+                stability_report,
+                rov_report,
+                rpki_coverage=rpki_coverage,
+                has_aspa=has_aspa,
             )
             if output_format == "json":
                 import json
+
                 return json.dumps(
                     {
                         "dora": dora_report.to_dict(),
@@ -2996,11 +3023,13 @@ async def get_roa_guidance(
             else:
                 for r in matching:
                     if r.max_length > prefix_len:
-                        permissive_max_length.append({
-                            "prefix": prefix,
-                            "max_length": r.max_length,
-                            "prefix_length": prefix_len,
-                        })
+                        permissive_max_length.append(
+                            {
+                                "prefix": prefix,
+                                "max_length": r.max_length,
+                                "prefix_length": prefix_len,
+                            }
+                        )
                     else:
                         valid_roas.append(prefix)
 

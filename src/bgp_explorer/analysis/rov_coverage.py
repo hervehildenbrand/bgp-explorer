@@ -51,7 +51,9 @@ class ROVCoverageReport:
     path_coverage: float  # 0.0-1.0, fraction of paths with ROV enforcer
     tier1_coverage: float  # 0.0-1.0, fraction of paths with Tier-1 ROV enforcer
     protection_level: str  # "high", "medium", "low"
-    rov_enforcers_in_paths: list[dict]  # [{"asn": int, "name": str, "category": str, "path_count": int}]
+    rov_enforcers_in_paths: list[
+        dict
+    ]  # [{"asn": int, "name": str, "category": str, "path_count": int}]
     summary: str
     # ASPA+ROV combined protection (set by analyze_combined_protection)
     origin_has_aspa: bool = False
@@ -67,9 +69,7 @@ class ROVCoverageAnalyzer:
     against BGP hijacks.
     """
 
-    def analyze_prefix_coverage(
-        self, prefix: str, routes: list[BGPRoute]
-    ) -> ROVCoverageReport:
+    def analyze_prefix_coverage(self, prefix: str, routes: list[BGPRoute]) -> ROVCoverageReport:
         """Analyze ROV coverage for a prefix based on observed routes.
 
         Args:
@@ -120,17 +120,24 @@ class ROVCoverageAnalyzer:
         for asn, count in sorted(enforcer_counts.items(), key=lambda x: -x[1]):
             info = get_rov_enforcer_info(asn)
             if info:
-                rov_enforcers_in_paths.append({
-                    "asn": asn,
-                    "name": info["name"],
-                    "category": info["category"],
-                    "path_count": count,
-                })
+                rov_enforcers_in_paths.append(
+                    {
+                        "asn": asn,
+                        "name": info["name"],
+                        "category": info["category"],
+                        "path_count": count,
+                    }
+                )
 
         # Generate summary
         summary = self._generate_summary(
-            prefix, total_paths, paths_with_rov, path_coverage,
-            tier1_coverage, protection_level, rov_enforcers_in_paths
+            prefix,
+            total_paths,
+            paths_with_rov,
+            path_coverage,
+            tier1_coverage,
+            protection_level,
+            rov_enforcers_in_paths,
         )
 
         return ROVCoverageReport(
@@ -166,9 +173,7 @@ class ROVCoverageAnalyzer:
         has_enforcer = len(enforcers) > 0
         return has_enforcer, enforcers
 
-    def _calculate_protection_level(
-        self, path_coverage: float, tier1_coverage: float
-    ) -> str:
+    def _calculate_protection_level(self, path_coverage: float, tier1_coverage: float) -> str:
         """Calculate the protection level based on coverage metrics.
 
         Args:
@@ -270,10 +275,7 @@ class ROVCoverageAnalyzer:
         # Determine RPKI status
         if origin_asn is not None:
             origin_match = any(r.origin_asn == origin_asn for r in roas)
-            length_ok = any(
-                r.origin_asn == origin_asn and prefix_len <= r.max_length
-                for r in roas
-            )
+            length_ok = any(r.origin_asn == origin_asn and prefix_len <= r.max_length for r in roas)
             if origin_match and length_ok:
                 rpki_status = "valid"
             elif not origin_match:
