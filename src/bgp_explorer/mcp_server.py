@@ -39,6 +39,7 @@ from bgp_explorer.sources.globalping import GlobalpingClient
 from bgp_explorer.sources.monocle import MonocleClient
 from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
+from bgp_explorer.sources.rpki_console import RpkiConsoleClient
 
 # Configure logging to stderr (NOT stdout - MCP uses stdout for protocol)
 logging.basicConfig(
@@ -80,6 +81,7 @@ _aspa_validator: ASPAValidator | None = None
 _stability_analyzer: StabilityAnalyzer | None = None
 _rov_coverage_analyzer: ROVCoverageAnalyzer | None = None
 _compliance_auditor: ComplianceAuditor | None = None
+_rpki_console: RpkiConsoleClient | None = None
 
 
 def get_stability_analyzer() -> StabilityAnalyzer:
@@ -168,12 +170,34 @@ def get_resilience_assessor() -> ResilienceAssessor:
     return _resilience_assessor
 
 
+async def get_rpki_console() -> RpkiConsoleClient | None:
+    """Get or create RpkiConsoleClient (lazy initialization)."""
+    global _rpki_console
+    if _rpki_console is None:
+        _rpki_console = RpkiConsoleClient()
+        try:
+            await _rpki_console.connect()
+        except Exception:
+            logger.warning("Failed to connect to rpki-client console")
+            return None
+    return _rpki_console
+
+
 async def get_aspa_validator() -> ASPAValidator | None:
-    """Get or create ASPAValidator (lazy initialization)."""
+    """Get or create ASPAValidator (lazy initialization).
+
+    Tries sources in priority order:
+    1. rpki-client console (real ASPA objects) — confidence 1.0
+    2. Monocle (fallback) — confidence 0.7
+    """
     global _aspa_validator
     if _aspa_validator is None:
+        rpki_console = await get_rpki_console()
         monocle = await get_monocle()
-        _aspa_validator = create_aspa_validator(monocle=monocle)
+        _aspa_validator = create_aspa_validator(
+            rpki_console=rpki_console,
+            monocle=monocle,
+        )
     return _aspa_validator
 
 

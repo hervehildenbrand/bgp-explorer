@@ -6,8 +6,9 @@ import pytest
 
 from bgp_explorer.analysis.aspa_validation import (
     ASPAValidator,
+    CompositeASPAProvider,
     MonocleASPAProvider,
-    RealASPAProvider,
+    RpkiClientASPAProvider,
     create_aspa_validator,
 )
 from bgp_explorer.models.as_relationship import ASRelationship
@@ -379,17 +380,107 @@ class TestCreateASPAValidator:
         validator = create_aspa_validator()
         assert validator is None
 
-    def test_real_aspa_raises(self):
-        """RealASPAProvider should raise NotImplementedError."""
-        validator = create_aspa_validator(use_real_aspa=True)
+    def test_with_rpki_console(self):
+        """Should create validator with RpkiClientASPAProvider."""
+        rpki_console = AsyncMock()
+        validator = create_aspa_validator(rpki_console=rpki_console)
         assert validator is not None
+        assert isinstance(validator, ASPAValidator)
+
+    def test_with_multiple_sources_creates_composite(self):
+        """Should create composite provider when multiple sources given."""
+        monocle = AsyncMock()
+        rpki_console = AsyncMock()
+        validator = create_aspa_validator(monocle=monocle, rpki_console=rpki_console)
+        assert validator is not None
+        assert isinstance(validator._provider, CompositeASPAProvider)
+
+
+class TestRpkiClientASPAProvider:
+    """Tests for RpkiClientASPAProvider."""
 
     @pytest.mark.asyncio
-    async def test_real_aspa_methods_raise(self):
-        """RealASPAProvider methods should raise NotImplementedError."""
-        provider = RealASPAProvider()
-        with pytest.raises(NotImplementedError):
-            await provider.get_authorized_providers(13335)
-        with pytest.raises(NotImplementedError):
-            await provider.is_authorized_provider(13335, 174)
+    async def test_get_authorized_providers(self):
+        """Should return providers from rpki-client console."""
+        rpki_console = AsyncMock()
+        rpki_console.get_aspa_providers = AsyncMock(return_value=frozenset({174, 3356}))
+
+        provider = RpkiClientASPAProvider(rpki_console)
+        result = await provider.get_authorized_providers(13335)
+        assert set(result) == {174, 3356}
+
+    @pytest.mark.asyncio
+    async def test_is_authorized_provider_true(self):
+        """Known provider should return True."""
+        rpki_console = AsyncMock()
+        rpki_console.get_aspa_providers = AsyncMock(return_value=frozenset({174, 3356}))
+
+        provider = RpkiClientASPAProvider(rpki_console)
+        result = await provider.is_authorized_provider(13335, 174)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_is_authorized_provider_false(self):
+        """Non-provider should return False."""
+        rpki_console = AsyncMock()
+        rpki_console.get_aspa_providers = AsyncMock(return_value=frozenset({174, 3356}))
+
+        provider = RpkiClientASPAProvider(rpki_console)
+        result = await provider.is_authorized_provider(13335, 666)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_is_authorized_no_aspa(self):
+        """ASN without ASPA should return None."""
+        rpki_console = AsyncMock()
+        rpki_console.get_aspa_providers = AsyncMock(return_value=frozenset())
+
+        provider = RpkiClientASPAProvider(rpki_console)
+        result = await provider.is_authorized_provider(99999, 174)
+        assert result is None
+
+    def test_source_name(self):
+        rpki_console = AsyncMock()
+        provider = RpkiClientASPAProvider(rpki_console)
         assert provider.source_name == "rpki-aspa"
+
+
+class TestCompositeASPAProvider:
+    """Tests for CompositeASPAProvider."""
+
+    @pytest.mark.asyncio
+    async def test_falls_through_to_next(self):
+        """Should fall through when first provider returns None."""
+        first = FakeASPAProvider({})  # No data for any ASN
+        second = FakeASPAProvider({13335: [174]})
+        composite = CompositeASPAProvider([first, second])
+
+        result = await composite.is_authorized_provider(13335, 174)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_prefers_first_provider(self):
+        """Should use first provider when it has data."""
+        first = FakeASPAProvider({13335: [174]})
+        second = FakeASPAProvider({13335: [3356]})  # Different providers
+        composite = CompositeASPAProvider([first, second])
+
+        result = await composite.is_authorized_provider(13335, 174)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_all_none_returns_none(self):
+        """Should return None when all providers return None."""
+        first = FakeASPAProvider({})
+        second = FakeASPAProvider({})
+        composite = CompositeASPAProvider([first, second])
+
+        result = await composite.is_authorized_provider(99999, 174)
+        assert result is None
+
+    def test_source_name(self):
+        first = FakeASPAProvider({})
+        second = FakeASPAProvider({})
+        composite = CompositeASPAProvider([first, second])
+        assert "composite" in composite.source_name
+        assert "fake" in composite.source_name

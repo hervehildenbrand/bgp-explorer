@@ -111,7 +111,7 @@ class BGPTools:
         self._path_analyzer = PathAnalyzer()
         self._as_analyzer = ASAnalyzer()
         self._resilience_assessor = ResilienceAssessor()
-        self._aspa_validator = create_aspa_validator(monocle=monocle)
+        self._aspa_validator = create_aspa_validator(monocle=monocle)  # rpki_console wired via MCP path
         self._stability_analyzer = StabilityAnalyzer()
         self._rov_coverage_analyzer = ROVCoverageAnalyzer()
 

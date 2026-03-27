@@ -1,7 +1,9 @@
 """ASPA (AS Provider Authorization) validation for BGP AS paths.
 
-Uses Monocle relationship data as a proxy for ASPA objects. When real
-RPKI ASPA objects become widely deployed, swap in RealASPAProvider.
+Supports multiple data sources for ASPA authorization:
+1. Real RPKI ASPA objects (from rpki-client console) — cryptographically signed
+2. CAIDA AS Relationships — inferred from observed BGP data (daily updates)
+3. Monocle — inferred from observed BGP data (on-demand, fallback)
 
 Valley-free routing rule: In a valid BGP path, the AS path goes
 customer->provider (uphill), then optionally through peers, then
@@ -11,10 +13,13 @@ downhill then uphill again, indicating a route leak.
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol, runtime_checkable
 
 from bgp_explorer.models.aspa import ASPAHopResult, ASPAState, ASPAValidationResult
 from bgp_explorer.sources.monocle import MonocleClient
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -80,22 +85,111 @@ class MonocleASPAProvider:
         return "monocle"
 
 
-class RealASPAProvider:
-    """Placeholder for real RPKI ASPA objects.
+class RpkiClientASPAProvider:
+    """Uses real RPKI ASPA objects from the rpki-client console.
 
-    When RPKI ASPA objects become widely deployed, implement this class
-    to fetch and validate against signed ASPA records.
+    Fetches cryptographically validated ASPA objects from
+    console.rpki-client.org. These are signed RPKI objects published
+    by ASN holders at their RIR, providing authoritative provider
+    authorization data.
     """
 
+    def __init__(self, rpki_console: "RpkiConsoleClient") -> None:
+        from bgp_explorer.sources.rpki_console import RpkiConsoleClient
+
+        self._rpki_console: RpkiConsoleClient = rpki_console
+
     async def get_authorized_providers(self, asn: int) -> list[int]:
-        raise NotImplementedError("Real ASPA objects not yet supported")
+        providers = await self._rpki_console.get_aspa_providers(asn)
+        return list(providers)
 
     async def is_authorized_provider(self, asn: int, provider_asn: int) -> bool | None:
-        raise NotImplementedError("Real ASPA objects not yet supported")
+        providers = await self._rpki_console.get_aspa_providers(asn)
+        if not providers:
+            return None  # No ASPA published for this ASN
+        return provider_asn in providers
 
     @property
     def source_name(self) -> str:
         return "rpki-aspa"
+
+
+class CAIDAASPAProvider:
+    """Uses CAIDA AS Relationships as a proxy for ASPA objects.
+
+    CAIDA provides inferred provider-customer relationships from
+    observed BGP data, updated monthly. More authoritative than
+    live Monocle queries for bulk analysis.
+    """
+
+    def __init__(self, caida: "CAIDARelationshipsClient") -> None:
+        from bgp_explorer.sources.caida_relationships import CAIDARelationshipsClient
+
+        self._caida: CAIDARelationshipsClient = caida
+
+    async def get_authorized_providers(self, asn: int) -> list[int]:
+        upstreams = await self._caida.get_upstreams(asn)
+        return list(upstreams)
+
+    async def is_authorized_provider(self, asn: int, provider_asn: int) -> bool | None:
+        upstreams = await self._caida.get_upstreams(asn)
+        if not upstreams:
+            rel = await self._caida.get_relationship(asn, provider_asn)
+            if rel == "unknown":
+                return None
+            return rel == "customer"  # asn is customer of provider_asn
+        return provider_asn in upstreams
+
+    @property
+    def source_name(self) -> str:
+        return "caida"
+
+
+class CompositeASPAProvider:
+    """Tries multiple ASPA data sources in priority order.
+
+    Falls through to the next provider when a source returns None
+    (no data). Real RPKI ASPA objects take priority over inferred
+    relationships.
+    """
+
+    def __init__(self, providers: list[ASPADataProvider]) -> None:
+        self._providers = providers
+
+    async def get_authorized_providers(self, asn: int) -> list[int]:
+        for provider in self._providers:
+            try:
+                result = await provider.get_authorized_providers(asn)
+                if result:
+                    return result
+            except Exception:
+                logger.debug(
+                    "Provider %s failed for ASN %d, trying next",
+                    provider.source_name,
+                    asn,
+                )
+                continue
+        return []
+
+    async def is_authorized_provider(self, asn: int, provider_asn: int) -> bool | None:
+        for provider in self._providers:
+            try:
+                result = await provider.is_authorized_provider(asn, provider_asn)
+                if result is not None:
+                    return result
+            except Exception:
+                logger.debug(
+                    "Provider %s failed for ASN %d, trying next",
+                    provider.source_name,
+                    asn,
+                )
+                continue
+        return None
+
+    @property
+    def source_name(self) -> str:
+        names = [p.source_name for p in self._providers]
+        return f"composite({','.join(names)})"
 
 
 class ASPAValidator:
@@ -168,6 +262,13 @@ class ASPAValidator:
             summary=summary,
         )
 
+    # Confidence scores by data source type
+    CONFIDENCE_SCORES: dict[str, float] = {
+        "rpki-aspa": 1.0,       # Cryptographically signed ASPA objects
+        "caida": 0.8,           # Inferred from observed BGP data (monthly)
+        "monocle": 0.7,         # Inferred from observed BGP data (on-demand)
+    }
+
     async def _validate_hop(self, asn: int, next_asn: int) -> ASPAHopResult:
         """Check if next_asn is an authorized provider for asn."""
         is_authorized = await self._provider.is_authorized_provider(asn, next_asn)
@@ -186,14 +287,17 @@ class ASPAValidator:
         else:
             rel_type = "unknown"
 
-        confidence = 0.0 if is_authorized is None else 0.7
+        source_name = self._provider.source_name
+        # For composite providers, extract the actual source used
+        base_source = source_name.split("(")[0] if "(" in source_name else source_name
+        confidence = 0.0 if is_authorized is None else self.CONFIDENCE_SCORES.get(base_source, 0.7)
 
         return ASPAHopResult(
             asn=asn,
             next_asn=next_asn,
             is_authorized_provider=is_authorized,
             relationship_type=rel_type,
-            data_source=self._provider.source_name,
+            data_source=source_name,
             confidence=confidence,
         )
 
@@ -276,19 +380,39 @@ class ASPAValidator:
 
 def create_aspa_validator(
     monocle: MonocleClient | None = None,
-    use_real_aspa: bool = False,
+    rpki_console: "RpkiConsoleClient | None" = None,
+    caida: "CAIDARelationshipsClient | None" = None,
 ) -> ASPAValidator | None:
     """Factory function to create an ASPA validator.
 
+    Creates a composite provider that tries sources in priority order:
+    1. rpki-client console (real ASPA objects) — confidence 1.0
+    2. CAIDA AS Relationships — confidence 0.8
+    3. Monocle (fallback) — confidence 0.7
+
     Args:
         monocle: MonocleClient for Monocle-based validation.
-        use_real_aspa: If True, use real RPKI ASPA objects (not yet supported).
+        rpki_console: RpkiConsoleClient for real RPKI ASPA objects.
+        caida: CAIDARelationshipsClient for CAIDA relationship data.
 
     Returns:
-        ASPAValidator if a data provider is available, None otherwise.
+        ASPAValidator if at least one data provider is available, None otherwise.
     """
-    if use_real_aspa:
-        return ASPAValidator(RealASPAProvider())
+    providers: list[ASPADataProvider] = []
+
+    if rpki_console is not None:
+        providers.append(RpkiClientASPAProvider(rpki_console))
+
+    if caida is not None:
+        providers.append(CAIDAASPAProvider(caida))
+
     if monocle is not None:
-        return ASPAValidator(MonocleASPAProvider(monocle))
-    return None
+        providers.append(MonocleASPAProvider(monocle))
+
+    if not providers:
+        return None
+
+    if len(providers) == 1:
+        return ASPAValidator(providers[0])
+
+    return ASPAValidator(CompositeASPAProvider(providers))
