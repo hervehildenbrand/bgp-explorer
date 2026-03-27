@@ -15,7 +15,6 @@ import bz2
 import logging
 import re
 import time
-from typing import Any
 
 import aiohttp
 

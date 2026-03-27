@@ -65,6 +65,9 @@ Key guidelines:
 - For WHOIS/IRR data (route objects, aut-num, abuse contacts), use get_whois_data
 - For route stability/flapping, use get_prefix_stability
 - For ROV deployment coverage, use analyze_rov_coverage
+- For ASPA status (published ASPA objects), use get_aspa_status
+- For ROA guidance (missing ROAs, maxLength issues), use get_roa_guidance
+- For ASPA guidance (recommended provider set), use get_aspa_guidance
 - For looking glass queries (vantage point routing), use query_looking_glass
 """,
 )
@@ -817,6 +820,22 @@ async def check_rpki_for_asn(
         coverage = len(results["valid"]) + len(results["invalid"])
         coverage_pct = (coverage / len(prefixes) * 100) if prefixes else 0
         summary.append(f"**RPKI coverage:** {coverage_pct:.1f}% ({coverage}/{len(prefixes)} prefixes have ROAs)")
+
+        # Add ASPA status
+        try:
+            rpki_console = await get_rpki_console()
+            if rpki_console is not None:
+                has_aspa = await rpki_console.has_aspa(asn)
+                summary.append("")
+                if has_aspa:
+                    aspa_obj = await rpki_console.get_aspa_object(asn)
+                    if aspa_obj:
+                        providers_str = ", ".join(f"AS{p}" for p in sorted(aspa_obj.provider_asns))
+                        summary.append(f"**ASPA:** Published (authorized providers: {providers_str})")
+                else:
+                    summary.append("**ASPA:** Not published (no ASPA object found for this ASN)")
+        except Exception:
+            pass  # ASPA status is supplementary, don't fail the whole tool
 
         return "\n".join(summary)
 
@@ -2136,15 +2155,17 @@ async def verify_aspa_path(
     This complements RPKI ROA validation: ROA checks origin authorization,
     ASPA checks path authorization (route leak detection).
 
-    Uses Monocle AS relationship data as a proxy for ASPA objects.
-
-    Requires the monocle binary to be installed.
+    Data sources (in priority order):
+    1. Real RPKI ASPA objects from rpki-client console (cryptographically signed)
+    2. CAIDA AS Relationships (inferred, updated monthly)
+    3. Monocle AS relationship data (inferred, on-demand fallback)
     """
     validator = await get_aspa_validator()
     if validator is None:
         return (
-            "ASPA validation requires Monocle for AS relationship data. "
-            "Install with: cargo install monocle"
+            "ASPA validation requires at least one data source. "
+            "The rpki-client console may be unreachable, and Monocle is not installed. "
+            "Install Monocle with: cargo install monocle"
         )
 
     try:
@@ -2160,7 +2181,7 @@ async def verify_aspa_path(
         result = await validator.validate_path(asns)
 
         path_str = " -> ".join(f"AS{asn}" for asn in result.as_path)
-        state_emoji = {
+        state_label = {
             "valid": "VALID", "invalid": "INVALID",
             "unknown": "UNKNOWN", "unverifiable": "UNVERIFIABLE",
         }.get(result.state.value, "ERROR")
@@ -2168,7 +2189,7 @@ async def verify_aspa_path(
         summary = [
             f"**ASPA Path Verification: {path_str}**",
             "",
-            f"**State:** {state_emoji}",
+            f"**State:** {state_label}",
             f"**Valley-free:** {'Yes' if result.valley_free else 'No (possible route leak)'}",
             "",
         ]
@@ -2181,9 +2202,16 @@ async def verify_aspa_path(
                     False: "not authorized",
                     None: "unknown",
                 }[hop.is_authorized_provider]
+                # Show data source tag
+                source_tag = {
+                    "rpki-aspa": "[RPKI-ASPA]",
+                    "caida": "[inferred/CAIDA]",
+                    "monocle": "[inferred/monocle]",
+                }.get(hop.data_source, f"[{hop.data_source}]")
                 summary.append(
                     f"  - AS{hop.asn} -> AS{hop.next_asn}: "
-                    f"{auth_str} ({hop.relationship_type})"
+                    f"{auth_str} ({hop.relationship_type}) "
+                    f"{source_tag} confidence={hop.confidence:.0%}"
                 )
             summary.append("")
 
@@ -2193,6 +2221,18 @@ async def verify_aspa_path(
                 summary.append(f"  - {issue}")
         else:
             summary.append("**No issues detected.** Path authorization looks good.")
+
+        # Check if any hop used real ASPA data
+        has_real_aspa = any(
+            h.data_source == "rpki-aspa" for h in result.hop_results
+        )
+        if not has_real_aspa and result.hop_results:
+            summary.append("")
+            summary.append(
+                "**Note:** No real RPKI ASPA objects found for ASes in this path. "
+                "Results based on inferred relationships. ~0.5% of ASes have "
+                "published ASPA objects as of early 2026."
+            )
 
         return "\n".join(summary)
 
@@ -2512,12 +2552,20 @@ async def analyze_rov_coverage(
     that enforce ROV (Route Origin Validation). Higher coverage means better
     protection against BGP hijacks with RPKI-invalid origins.
 
+    Also checks ASPA deployment status of the origin ASN and computes
+    a combined ASPA+ROV protection score.
+
     Protection levels:
     - HIGH: >=80% path coverage AND >=60% Tier-1 coverage
     - MEDIUM: >=50% path coverage
     - LOW: <50% path coverage
 
-    Data source: RIPE Stat BGP State + curated ROV enforcer database.
+    Combined protection:
+    - FULL: ROA valid + ASPA published + HIGH ROV coverage
+    - PARTIAL: ROA valid + (ASPA or medium/high ROV)
+    - MINIMAL: Missing ROA or low coverage
+
+    Data source: RIPE Stat BGP State + ROV enforcer database + rpki-client console.
     """
     try:
         client = await get_ripe_stat()
@@ -2553,6 +2601,47 @@ async def analyze_rov_coverage(
                 summary.append(
                     f"  ... and {len(report.rov_enforcers_in_paths) - 10} more"
                 )
+
+        # Add ASPA + ROA + combined analysis from rpki-client console
+        try:
+            rpki_console = await get_rpki_console()
+            if rpki_console is not None:
+                # Get origin ASN from routes
+                origin_asn = routes[0].origin_asn if routes else None
+                has_roa = False
+                has_aspa = False
+
+                if origin_asn:
+                    # Check ASPA status
+                    has_aspa = await rpki_console.has_aspa(origin_asn)
+                    # Check ROA from rpki-client dump
+                    roas = await rpki_console.get_roas_for_prefix(prefix)
+                    roa_analysis = analyzer.analyze_roa_for_prefix(prefix, roas, origin_asn)
+                    has_roa = roa_analysis.has_roa and roa_analysis.rpki_status == "valid"
+
+                    summary.append("")
+                    summary.append(f"**Origin AS{origin_asn} RPKI Status:**")
+                    if roa_analysis.has_roa:
+                        ml_status = "OK" if roa_analysis.max_length_ok else f"WARN: maxLength /{roa_analysis.max_length} > /{roa_analysis.prefix_length}"
+                        summary.append(f"  - ROA: {roa_analysis.rpki_status.upper()} (maxLength: {ml_status})")
+                    else:
+                        summary.append("  - ROA: NOT FOUND (no ROA for this prefix)")
+
+                    if has_aspa:
+                        aspa_obj = await rpki_console.get_aspa_object(origin_asn)
+                        if aspa_obj:
+                            providers_str = ", ".join(f"AS{p}" for p in sorted(aspa_obj.provider_asns))
+                            summary.append(f"  - ASPA: PUBLISHED (providers: {providers_str})")
+                    else:
+                        summary.append("  - ASPA: NOT PUBLISHED")
+
+                    # Combined score
+                    combined = analyzer.compute_combined_protection(
+                        report.protection_level, has_roa, has_aspa
+                    )
+                    summary.append(f"  - **Combined Protection: {combined.upper()}**")
+        except Exception:
+            pass  # ASPA/ROA enrichment is supplementary
 
         return "\n".join(summary)
 
@@ -2769,6 +2858,298 @@ async def run_compliance_audit(
 
     except Exception as e:
         return f"Error running compliance audit for AS{asn}: {e}"
+
+
+# =============================================================================
+# RPKI ASPA Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def get_aspa_status(
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
+) -> str:
+    """Check if an ASN has published ASPA (AS Provider Authorization) objects.
+
+    ASPA objects are cryptographically signed RPKI records that authorize
+    a set of upstream providers for a customer ASN. They complement ROAs
+    by enabling route leak detection via path validation.
+
+    Returns the ASPA status, authorized provider list, and inferred
+    upstreams for comparison.
+
+    Data source: rpki-client console (console.rpki-client.org) — free, no auth.
+    """
+    try:
+        rpki_console = await get_rpki_console()
+        if rpki_console is None:
+            return "rpki-client console is unavailable. Cannot check ASPA status."
+
+        has_aspa = await rpki_console.has_aspa(asn)
+
+        summary = [f"**ASPA Status for AS{asn}**", ""]
+
+        if has_aspa:
+            aspa_obj = await rpki_console.get_aspa_object(asn)
+            if aspa_obj:
+                providers_str = ", ".join(f"AS{p}" for p in sorted(aspa_obj.provider_asns))
+                summary.append("**Status:** PUBLISHED")
+                summary.append(f"**Authorized Providers:** {providers_str}")
+                summary.append(f"**Provider Count:** {len(aspa_obj.provider_asns)}")
+        else:
+            summary.append("**Status:** NOT PUBLISHED")
+            summary.append("")
+            summary.append(
+                "This ASN has not published any ASPA objects in the RPKI. "
+                "Consider creating one at your RIR portal to protect against "
+                "route leaks."
+            )
+
+            # Try to show inferred upstreams for guidance
+            monocle = await get_monocle()
+            if monocle is not None:
+                try:
+                    upstreams = await monocle.get_as_upstreams(asn)
+                    if upstreams:
+                        upstream_strs = []
+                        for u in upstreams[:15]:
+                            name = f"AS{u.asn2}"
+                            if u.asn2_name:
+                                name += f" ({u.asn2_name})"
+                            upstream_strs.append(name)
+                        summary.append("")
+                        summary.append("**Inferred Upstreams (from BGP data):**")
+                        for u in upstream_strs:
+                            summary.append(f"  - {u}")
+                        summary.append("")
+                        summary.append(
+                            "These are potential providers to include in an ASPA object. "
+                            "Verify with your actual transit agreements before publishing."
+                        )
+                except Exception:
+                    pass
+
+        # Add global context
+        try:
+            total = await rpki_console.get_aspa_count()
+            meta = await rpki_console.get_dump_metadata()
+            summary.append("")
+            summary.append(f"**Global ASPA Deployment:** {total} ASes have published ASPA objects")
+            summary.append(f"**Data Source:** rpki-client console (as of {meta['generated']})")
+        except Exception:
+            pass
+
+        return "\n".join(summary)
+
+    except Exception as e:
+        return f"Error checking ASPA status for AS{asn}: {e}"
+
+
+@mcp.tool()
+async def get_roa_guidance(
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
+) -> str:
+    """Get ROA (Route Origin Authorization) guidance for an ASN.
+
+    Analyzes current prefix announcements against existing ROAs to identify:
+    - Prefixes missing ROA coverage
+    - ROAs with overly permissive maxLength (security risk)
+    - Recommended ROA configuration
+
+    Best practice: maxLength should equal the announced prefix length to
+    prevent sub-prefix hijacks.
+
+    Data source: RIPE Stat (announcements) + rpki-client console (ROAs).
+    """
+    try:
+        rpki_console = await get_rpki_console()
+        if rpki_console is None:
+            return "rpki-client console is unavailable. Cannot analyze ROA coverage."
+
+        client = await get_ripe_stat()
+        prefixes = await client.get_announced_prefixes(asn)
+
+        if not prefixes:
+            return f"AS{asn} is not announcing any prefixes, or the ASN does not exist."
+
+        roas = await rpki_console.get_roas_for_origin(asn)
+
+        missing_roas = []
+        permissive_max_length = []
+        valid_roas = []
+
+        for prefix in prefixes:
+            prefix_len = int(prefix.split("/")[1]) if "/" in prefix else 0
+            matching = [r for r in roas if r.prefix == prefix]
+
+            if not matching:
+                missing_roas.append(prefix)
+            else:
+                for r in matching:
+                    if r.max_length > prefix_len:
+                        permissive_max_length.append({
+                            "prefix": prefix,
+                            "max_length": r.max_length,
+                            "prefix_length": prefix_len,
+                        })
+                    else:
+                        valid_roas.append(prefix)
+
+        summary = [
+            f"**ROA Guidance for AS{asn}**",
+            "",
+            f"**Announced Prefixes:** {len(prefixes)}",
+            f"**Existing ROAs:** {len(roas)}",
+            "",
+        ]
+
+        coverage_pct = (len(valid_roas) + len(permissive_max_length)) / len(prefixes) * 100
+        summary.append(f"**ROA Coverage:** {coverage_pct:.0f}%")
+        summary.append("")
+
+        if valid_roas:
+            summary.append(f"**Correctly Configured ({len(valid_roas)}):**")
+            for p in valid_roas[:10]:
+                summary.append(f"  - {p}")
+            if len(valid_roas) > 10:
+                summary.append(f"  ... and {len(valid_roas) - 10} more")
+            summary.append("")
+
+        if permissive_max_length:
+            summary.append(f"**Overly Permissive maxLength ({len(permissive_max_length)}):**")
+            for item in permissive_max_length[:10]:
+                summary.append(
+                    f"  - {item['prefix']}: maxLength=/{item['max_length']} "
+                    f"(should be /{item['prefix_length']})"
+                )
+            summary.append("")
+            summary.append(
+                "  RECOMMENDATION: Set maxLength to match the announced prefix "
+                "length to prevent sub-prefix hijack attacks."
+            )
+            summary.append("")
+
+        if missing_roas:
+            summary.append(f"**Missing ROAs ({len(missing_roas)}):**")
+            for p in missing_roas[:15]:
+                prefix_len = int(p.split("/")[1]) if "/" in p else 0
+                summary.append(f"  - {p} → create ROA: origin AS{asn}, maxLength /{prefix_len}")
+            if len(missing_roas) > 15:
+                summary.append(f"  ... and {len(missing_roas) - 15} more")
+            summary.append("")
+            summary.append(
+                "  RECOMMENDATION: Create ROAs for all announced prefixes at your "
+                "RIR portal (RIPE, ARIN, APNIC, etc.)."
+            )
+
+        if not missing_roas and not permissive_max_length:
+            summary.append("All prefixes are covered by correctly configured ROAs.")
+
+        return "\n".join(summary)
+
+    except Exception as e:
+        return f"Error generating ROA guidance for AS{asn}: {e}"
+
+
+@mcp.tool()
+async def get_aspa_guidance(
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
+) -> str:
+    """Get ASPA (AS Provider Authorization) guidance for an ASN.
+
+    Compares the published ASPA object (if any) with inferred upstream
+    providers to identify gaps or stale entries. Outputs a recommended
+    provider set for creating or updating the ASPA object at the RIR portal.
+
+    Data source: rpki-client console (ASPA) + Monocle (inferred upstreams).
+    """
+    try:
+        rpki_console = await get_rpki_console()
+        if rpki_console is None:
+            return "rpki-client console is unavailable. Cannot generate ASPA guidance."
+
+        has_aspa = await rpki_console.has_aspa(asn)
+        aspa_providers: frozenset[int] = frozenset()
+        if has_aspa:
+            aspa_obj = await rpki_console.get_aspa_object(asn)
+            if aspa_obj:
+                aspa_providers = aspa_obj.provider_asns
+
+        # Get inferred upstreams
+        inferred_upstreams: list[tuple[int, str]] = []
+        monocle = await get_monocle()
+        if monocle is not None:
+            try:
+                upstreams = await monocle.get_as_upstreams(asn)
+                for u in upstreams:
+                    name = u.asn2_name or ""
+                    inferred_upstreams.append((u.asn2, name))
+            except Exception:
+                pass
+
+        inferred_asns = {asn for asn, _ in inferred_upstreams}
+
+        summary = [f"**ASPA Guidance for AS{asn}**", ""]
+
+        if has_aspa:
+            summary.append("**Current ASPA Object:**")
+            providers_str = ", ".join(f"AS{p}" for p in sorted(aspa_providers))
+            summary.append(f"  Authorized providers: {providers_str}")
+            summary.append("")
+
+            # Find gaps
+            missing_in_aspa = inferred_asns - aspa_providers
+            extra_in_aspa = aspa_providers - inferred_asns
+
+            if missing_in_aspa:
+                summary.append("**Potentially Missing Providers:**")
+                for missing_asn in sorted(missing_in_aspa):
+                    name = next((n for a, n in inferred_upstreams if a == missing_asn), "")
+                    label = f"AS{missing_asn}"
+                    if name:
+                        label += f" ({name})"
+                    summary.append(f"  - {label} — seen as upstream in BGP data but not in ASPA")
+                summary.append("")
+
+            if extra_in_aspa:
+                summary.append("**Providers in ASPA Not Seen in BGP:**")
+                for extra_asn in sorted(extra_in_aspa):
+                    summary.append(
+                        f"  - AS{extra_asn} — in ASPA but not observed as upstream "
+                        "(may be backup transit or recently depeered)"
+                    )
+                summary.append("")
+
+            if not missing_in_aspa and not extra_in_aspa:
+                summary.append("ASPA object matches observed upstreams. No changes needed.")
+        else:
+            summary.append("**No ASPA object published.**")
+            summary.append("")
+
+            if inferred_upstreams:
+                summary.append("**Recommended Provider Set (based on observed BGP upstreams):**")
+                for upstream_asn, name in sorted(inferred_upstreams, key=lambda x: x[0]):
+                    label = f"AS{upstream_asn}"
+                    if name:
+                        label += f" ({name})"
+                    summary.append(f"  - {label}")
+                summary.append("")
+                summary.append(
+                    "To create an ASPA object, log in to your RIR portal "
+                    "(RIPE NCC, ARIN, APNIC) and add these ASNs as authorized "
+                    "providers for your AS. Verify against your actual transit "
+                    "agreements before publishing."
+                )
+            else:
+                summary.append(
+                    "No upstream data available. Install Monocle "
+                    "(cargo install monocle) to infer upstreams from BGP data."
+                )
+
+        return "\n".join(summary)
+
+    except Exception as e:
+        return f"Error generating ASPA guidance for AS{asn}: {e}"
 
 
 # =============================================================================

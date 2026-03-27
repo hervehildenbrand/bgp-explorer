@@ -1,10 +1,12 @@
 """ROV coverage analysis module.
 
 Provides tools to analyze how well a prefix is protected by ROV-enforcing
-networks in the global routing table.
+networks in the global routing table, and combined ASPA+ROV protection scoring.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 from bgp_explorer.data.rov_enforcers import (
     TIER1_ROV_ENFORCERS,
@@ -12,6 +14,27 @@ from bgp_explorer.data.rov_enforcers import (
     is_known_rov_enforcer,
 )
 from bgp_explorer.models.route import BGPRoute
+
+
+@dataclass
+class ROAAnalysis:
+    """Analysis of ROA configuration for a prefix.
+
+    Attributes:
+        has_roa: Whether a ROA exists for this prefix.
+        rpki_status: RPKI validation status ("valid", "invalid", "not-found").
+        max_length: maxLength in the ROA (if exists).
+        prefix_length: Actual prefix length being announced.
+        max_length_ok: Whether maxLength follows best practice (== prefix_length).
+        trust_anchor: RIR trust anchor of the ROA.
+    """
+
+    has_roa: bool = False
+    rpki_status: str = "not-found"
+    max_length: int = 0
+    prefix_length: int = 0
+    max_length_ok: bool = True
+    trust_anchor: str = ""
 
 
 @dataclass
@@ -30,6 +53,10 @@ class ROVCoverageReport:
     protection_level: str  # "high", "medium", "low"
     rov_enforcers_in_paths: list[dict]  # [{"asn": int, "name": str, "category": str, "path_count": int}]
     summary: str
+    # ASPA+ROV combined protection (set by analyze_combined_protection)
+    origin_has_aspa: bool = False
+    roa_analysis: ROAAnalysis = field(default_factory=ROAAnalysis)
+    combined_protection: str = ""  # "full", "partial", "minimal"
 
 
 class ROVCoverageAnalyzer:
@@ -209,3 +236,84 @@ class ROVCoverageAnalyzer:
             summary += f" Key enforcers: {names}."
 
         return summary
+
+    @staticmethod
+    def analyze_roa_for_prefix(
+        prefix: str,
+        roas: list,
+        origin_asn: int | None = None,
+    ) -> ROAAnalysis:
+        """Analyze ROA configuration for a prefix using rpki-client dump data.
+
+        Args:
+            prefix: The IP prefix in CIDR notation.
+            roas: List of ROAObject instances covering this prefix.
+            origin_asn: The origin ASN to validate against (optional).
+
+        Returns:
+            ROAAnalysis with ROA configuration details.
+        """
+        if not roas:
+            return ROAAnalysis(has_roa=False, rpki_status="not-found")
+
+        prefix_len = int(prefix.split("/")[1]) if "/" in prefix else 0
+
+        # Find the best matching ROA
+        matching_roa = None
+        for roa in roas:
+            if origin_asn is not None and roa.origin_asn == origin_asn:
+                matching_roa = roa
+                break
+        if matching_roa is None:
+            matching_roa = roas[0]
+
+        # Determine RPKI status
+        if origin_asn is not None:
+            origin_match = any(r.origin_asn == origin_asn for r in roas)
+            length_ok = any(
+                r.origin_asn == origin_asn and prefix_len <= r.max_length
+                for r in roas
+            )
+            if origin_match and length_ok:
+                rpki_status = "valid"
+            elif not origin_match:
+                rpki_status = "invalid"
+            else:
+                rpki_status = "invalid"  # length mismatch
+        else:
+            rpki_status = "valid"  # ROA exists, can't check origin
+
+        max_length_ok = matching_roa.max_length == prefix_len
+
+        return ROAAnalysis(
+            has_roa=True,
+            rpki_status=rpki_status,
+            max_length=matching_roa.max_length,
+            prefix_length=prefix_len,
+            max_length_ok=max_length_ok,
+            trust_anchor=matching_roa.trust_anchor,
+        )
+
+    @staticmethod
+    def compute_combined_protection(
+        rov_protection_level: str,
+        has_roa: bool,
+        has_aspa: bool,
+    ) -> str:
+        """Compute combined ASPA+ROV protection level.
+
+        Args:
+            rov_protection_level: ROV path coverage level ("high", "medium", "low").
+            has_roa: Whether a valid ROA exists.
+            has_aspa: Whether the origin has published ASPA objects.
+
+        Returns:
+            Combined protection: "full", "partial", or "minimal".
+        """
+        if has_roa and has_aspa and rov_protection_level == "high":
+            return "full"
+        if has_roa and (has_aspa or rov_protection_level in ("high", "medium")):
+            return "partial"
+        if has_roa:
+            return "partial"
+        return "minimal"

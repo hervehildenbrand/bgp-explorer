@@ -14,10 +14,14 @@ downhill then uphill again, indicating a route leak.
 from __future__ import annotations
 
 import logging
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from bgp_explorer.models.aspa import ASPAHopResult, ASPAState, ASPAValidationResult
 from bgp_explorer.sources.monocle import MonocleClient
+
+if TYPE_CHECKING:
+    from bgp_explorer.sources.caida_relationships import CAIDARelationshipsClient
+    from bgp_explorer.sources.rpki_console import RpkiConsoleClient
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +98,8 @@ class RpkiClientASPAProvider:
     authorization data.
     """
 
-    def __init__(self, rpki_console: "RpkiConsoleClient") -> None:
-        from bgp_explorer.sources.rpki_console import RpkiConsoleClient
-
-        self._rpki_console: RpkiConsoleClient = rpki_console
+    def __init__(self, rpki_console: RpkiConsoleClient) -> None:
+        self._rpki_console = rpki_console
 
     async def get_authorized_providers(self, asn: int) -> list[int]:
         providers = await self._rpki_console.get_aspa_providers(asn)
@@ -122,10 +124,8 @@ class CAIDAASPAProvider:
     live Monocle queries for bulk analysis.
     """
 
-    def __init__(self, caida: "CAIDARelationshipsClient") -> None:
-        from bgp_explorer.sources.caida_relationships import CAIDARelationshipsClient
-
-        self._caida: CAIDARelationshipsClient = caida
+    def __init__(self, caida: CAIDARelationshipsClient) -> None:
+        self._caida = caida
 
     async def get_authorized_providers(self, asn: int) -> list[int]:
         upstreams = await self._caida.get_upstreams(asn)
@@ -380,8 +380,8 @@ class ASPAValidator:
 
 def create_aspa_validator(
     monocle: MonocleClient | None = None,
-    rpki_console: "RpkiConsoleClient | None" = None,
-    caida: "CAIDARelationshipsClient | None" = None,
+    rpki_console: RpkiConsoleClient | None = None,
+    caida: CAIDARelationshipsClient | None = None,
 ) -> ASPAValidator | None:
     """Factory function to create an ASPA validator.
 
