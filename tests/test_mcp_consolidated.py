@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bgp_explorer import mcp_server
-from bgp_explorer.mcp_server import parse_sections, build_response
-
+from bgp_explorer.mcp_server import build_response, parse_sections
 
 # =============================================================================
 # parse_sections tests
@@ -274,6 +273,7 @@ class TestInvestigateAsn:
 def _make_routes(prefix="8.8.8.0/24", origin=15169, count=12):
     """Create mock BGPRoute objects."""
     from datetime import UTC, datetime
+
     from bgp_explorer.models.route import BGPRoute
 
     return [
