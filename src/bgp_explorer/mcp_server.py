@@ -22,10 +22,9 @@ Usage:
 import ipaddress
 import logging
 import sys
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
-
-from collections.abc import Awaitable, Callable
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -97,15 +96,21 @@ mcp = FastMCP(
     name="bgp-explorer",
     instructions="""BGP routing investigation tools for network operators.
 
-Use these tools to investigate BGP routing, analyze AS relationships,
-detect anomalies, and probe network connectivity from global vantage points.
+8 tools covering ASN investigation, prefix analysis, RPKI/ASPA validation,
+routing history, IXP presence, network probing, and compliance audits.
 
 Workflow:
-- When investigating a network by name, use search_asn FIRST to find the ASN
-- For a network report, start with get_asn_details, then add specific checks as needed
-- For peer/upstream/downstream counts, use get_as_peers/get_as_upstreams/get_as_downstreams
-- Only use MANRS tools (check_manrs, get_manrs_info) when the user explicitly asks about MANRS
-- Only use compliance tools (run_compliance_audit) when the user explicitly asks about compliance, DORA, NIS2, or MANRS audit
+1. search_asn — Find ASNs by name (always start here if user gives a name)
+2. investigate_asn — Everything about an ASN (connectivity, prefixes, contacts, resilience, whois)
+3. investigate_prefix — Everything about a prefix (routing, anomalies, paths, collectors)
+4. check_rpki — RPKI/ROA/ASPA analysis (pass ASN for coverage, or AS path string for validation)
+5. get_routing_history_v2 — Historical routing, stability, update activity
+6. investigate_ixp — IXP presence (pass ASN) or IXP details (pass name)
+7. probe_network — Ping or traceroute from global vantage points
+8. run_audit — DORA/NIS2/MANRS compliance audits
+
+Each tool returns a summary by default. Use the 'sections' parameter to expand
+specific areas (e.g., investigate_asn(15169, sections=["connectivity", "resilience"])).
 """,
 )
 
@@ -387,7 +392,6 @@ async def search_asn(
         return f"Error searching for ASN: {e}"
 
 
-@mcp.tool()
 async def lookup_prefix(
     prefix: Annotated[
         str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")
@@ -452,7 +456,6 @@ async def lookup_prefix(
         return f"Error looking up prefix {prefix}: {e}"
 
 
-@mcp.tool()
 async def get_asn_announcements(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
     address_family: Annotated[
@@ -556,7 +559,6 @@ async def get_asn_announcements(
         return f"Error getting announcements for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def get_routing_history(
     resource: Annotated[
         str, Field(description="IP prefix (e.g., '8.8.8.0/24') or ASN (e.g., 'AS15169')")
@@ -614,7 +616,6 @@ async def get_routing_history(
         return f"Error getting routing history: {e}"
 
 
-@mcp.tool()
 async def get_bgp_path_history(
     prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")],
     start_date: Annotated[str, Field(description="Start date in ISO format (YYYY-MM-DD)")],
@@ -724,7 +725,6 @@ async def get_bgp_path_history(
         return f"Error getting BGP path history: {e}"
 
 
-@mcp.tool()
 async def get_rpki_status(
     prefix: Annotated[str, Field(description="IP prefix in CIDR notation (IPv4 or IPv6)")],
     origin_asn: Annotated[int, Field(description="The AS number claiming to originate the prefix")],
@@ -799,7 +799,6 @@ async def get_rpki_status(
         return f"Error checking RPKI status: {e}"
 
 
-@mcp.tool()
 async def check_rpki_for_asn(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
 ) -> str:
@@ -913,7 +912,6 @@ async def check_rpki_for_asn(
         return f"Error checking RPKI for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def analyze_as_path(
     prefix: Annotated[str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")],
 ) -> str:
@@ -984,7 +982,6 @@ async def analyze_as_path(
         return f"Error analyzing AS paths for {prefix}: {e}"
 
 
-@mcp.tool()
 async def compare_collectors(
     prefix: Annotated[str, Field(description="IP prefix in CIDR notation")],
 ) -> str:
@@ -1039,7 +1036,6 @@ async def compare_collectors(
         return f"Error comparing collectors for {prefix}: {e}"
 
 
-@mcp.tool()
 async def get_asn_details(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
 ) -> str:
@@ -1120,7 +1116,6 @@ async def get_asn_details(
         return f"Error getting details for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def check_prefix_anomalies(
     prefix: Annotated[
         str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')")
@@ -1327,7 +1322,6 @@ async def check_prefix_anomalies(
 # =============================================================================
 
 
-@mcp.tool()
 async def get_as_peers(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 15169 for Google)")],
 ) -> str:
@@ -1372,7 +1366,6 @@ async def get_as_peers(
         return f"Error getting peers for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def get_as_upstreams(
     asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
@@ -1447,7 +1440,6 @@ async def get_as_upstreams(
         return f"Error getting upstreams for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def get_as_downstreams(
     asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
@@ -1493,7 +1485,6 @@ async def get_as_downstreams(
         return f"Error getting downstreams for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def check_as_relationship(
     asn1: Annotated[int, Field(description="First Autonomous System Number")],
     asn2: Annotated[int, Field(description="Second Autonomous System Number")],
@@ -1548,7 +1539,6 @@ async def check_as_relationship(
         return f"Error checking relationship between AS{asn1} and AS{asn2}: {e}"
 
 
-@mcp.tool()
 async def get_as_connectivity_summary(
     asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
@@ -1650,7 +1640,6 @@ def _check_bogon_target(target: str) -> str | None:
     return None
 
 
-@mcp.tool()
 async def ping_from_global(
     target: Annotated[str, Field(description="IP address or hostname to ping")],
     locations: Annotated[
@@ -1742,7 +1731,6 @@ async def ping_from_global(
         return f"Error performing global ping to {target}: {e}"
 
 
-@mcp.tool()
 async def traceroute_from_global(
     target: Annotated[str, Field(description="IP address or hostname to trace")],
     locations: Annotated[
@@ -1841,7 +1829,6 @@ async def traceroute_from_global(
 # =============================================================================
 
 
-@mcp.tool()
 async def get_ixps_for_asn(
     asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
@@ -1890,7 +1877,6 @@ async def get_ixps_for_asn(
         return f"Error getting IXP presence for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def get_networks_at_ixp(
     ixp: Annotated[str, Field(description="IXP name (e.g., 'AMS-IX', 'DE-CIX Frankfurt') or ID")],
 ) -> str:
@@ -1944,7 +1930,6 @@ async def get_networks_at_ixp(
         return f"Error getting networks at IXP '{ixp}': {e}"
 
 
-@mcp.tool()
 async def get_ixp_details(
     ixp: Annotated[str, Field(description="IXP name (e.g., 'AMS-IX', 'DE-CIX Frankfurt') or ID")],
 ) -> str:
@@ -1991,7 +1976,6 @@ async def get_ixp_details(
         return f"Error getting details for IXP '{ixp}': {e}"
 
 
-@mcp.tool()
 async def get_network_contacts(
     asn: Annotated[int, Field(description="Autonomous System Number")],
 ) -> str:
@@ -2084,7 +2068,6 @@ async def get_network_contacts(
 # =============================================================================
 
 
-@mcp.tool()
 async def assess_network_resilience(
     asn: Annotated[
         int, Field(description="Autonomous System Number to assess (e.g., 15169 for Google)")
@@ -2212,7 +2195,6 @@ async def assess_network_resilience(
 # =============================================================================
 
 
-@mcp.tool()
 async def verify_aspa_path(
     as_path: Annotated[
         str,
@@ -2318,7 +2300,6 @@ async def verify_aspa_path(
         return f"Error verifying ASPA path: {e}"
 
 
-@mcp.tool()
 async def get_whois_data(
     resource: Annotated[
         str,
@@ -2386,7 +2367,6 @@ async def get_whois_data(
 # =============================================================================
 
 
-@mcp.tool()
 async def query_looking_glass(
     prefix: Annotated[
         str,
@@ -2449,7 +2429,6 @@ async def query_looking_glass(
         return f"Error querying looking glass for {prefix}: {e}"
 
 
-@mcp.tool()
 async def get_prefix_stability(
     prefix: Annotated[
         str,
@@ -2537,7 +2516,6 @@ async def get_prefix_stability(
         return f"Error analyzing stability for {prefix}: {e}"
 
 
-@mcp.tool()
 async def get_bgp_update_activity(
     resource: Annotated[
         str,
@@ -2611,7 +2589,6 @@ async def get_bgp_update_activity(
         return f"Error getting update activity for {resource}: {e}"
 
 
-@mcp.tool()
 async def analyze_rov_coverage(
     prefix: Annotated[
         str,
@@ -2732,7 +2709,6 @@ async def analyze_rov_coverage(
 # =============================================================================
 
 
-@mcp.tool()
 async def run_compliance_audit(
     asn: Annotated[
         int, Field(description="Autonomous System Number to audit (e.g., 15169 for Google)")
@@ -3052,7 +3028,6 @@ async def run_compliance_audit(
 # =============================================================================
 
 
-@mcp.tool()
 async def get_aspa_status(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
 ) -> str:
@@ -3132,7 +3107,6 @@ async def get_aspa_status(
         return f"Error checking ASPA status for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def get_roa_guidance(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
 ) -> str:
@@ -3240,7 +3214,6 @@ async def get_roa_guidance(
         return f"Error generating ROA guidance for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def get_aspa_guidance(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
 ) -> str:
@@ -3341,7 +3314,6 @@ async def get_aspa_guidance(
         return f"Error generating ASPA guidance for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def validate_prefix_routes(
     prefix: Annotated[
         str,
@@ -3559,7 +3531,6 @@ async def validate_prefix_routes(
 # =============================================================================
 
 
-@mcp.tool()
 async def check_manrs(
     asn: Annotated[
         int, Field(description="Autonomous System Number to assess (e.g., 13335 for Cloudflare)")
@@ -3658,7 +3629,6 @@ async def check_manrs(
         return f"Error assessing MANRS readiness for AS{asn}: {e}"
 
 
-@mcp.tool()
 async def get_manrs_info(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
 ) -> str:
