@@ -2707,18 +2707,21 @@ async def run_compliance_audit(
     ],
     framework: Annotated[
         str,
-        Field(description="Compliance framework: 'dora', 'nis2', or 'both' (default: 'both')"),
+        Field(
+            description="Compliance framework: 'dora', 'nis2', 'manrs', or 'both' (default: 'both'). 'both' = DORA+NIS2."
+        ),
     ] = "both",
     output_format: Annotated[
         str,
         Field(description="Output format: 'text' or 'json' (default: 'text')"),
     ] = "text",
 ) -> str:
-    """Run a DORA and/or NIS 2 compliance audit on a network's BGP routing.
+    """Run a DORA, NIS 2, or MANRS compliance audit on a network's BGP routing.
 
-    Maps BGP analysis results to EU regulatory requirements:
+    Maps BGP analysis results to regulatory/industry requirements:
     - DORA (2022/2554): ICT risk management for financial entities
     - NIS 2 (2022/2555): Cybersecurity for critical infrastructure operators
+    - MANRS: Mutually Agreed Norms for Routing Security (4 Actions)
 
     Checks include:
     - Transit concentration risk (single point of failure)
@@ -2731,23 +2734,109 @@ async def run_compliance_audit(
 
     Scoring: 0-100, where >=80 is COMPLIANT, >=50 is PARTIAL, <50 is NON_COMPLIANT.
 
-    Requires: monocle binary and PeeringDB data (same as assess_network_resilience).
+    Requires: monocle binary and PeeringDB data for DORA/NIS2 (same as assess_network_resilience).
+    MANRS audits do not require monocle.
     """
-    monocle = await get_monocle()
-    if monocle is None:
-        return (
-            "Monocle is not configured. Compliance audit requires "
-            "Monocle for AS relationship data. Install with: cargo install monocle"
-        )
-
-    peeringdb = await get_peeringdb()
-    if peeringdb is None:
-        return (
-            "PeeringDB is not configured. Compliance audit requires "
-            "PeeringDB for IXP presence data."
-        )
-
     try:
+        fw = framework.lower()
+
+        # MANRS doesn't require monocle — handle separately
+        if fw == "manrs":
+            auditor = get_compliance_auditor()
+            client = await get_ripe_stat()
+
+            # Gather prefixes
+            prefixes = []
+            try:
+                prefixes = await client.get_announced_prefixes(asn)
+            except Exception:
+                logger.debug("Could not fetch prefixes for AS%d", asn)
+
+            # RPKI coverage
+            rpki_coverage = None
+            try:
+                if prefixes:
+                    valid_count = 0
+                    checked = 0
+                    for prefix in prefixes:
+                        try:
+                            status = await client.get_rpki_validation(prefix, asn)
+                            checked += 1
+                            if status == "valid":
+                                valid_count += 1
+                        except Exception:
+                            pass
+                    if checked > 0:
+                        rpki_coverage = valid_count / checked
+            except Exception:
+                logger.debug("Could not fetch RPKI data for AS%d", asn)
+
+            # ASPA status
+            has_aspa = None
+            try:
+                rpki_console = await get_rpki_console()
+                if rpki_console is not None:
+                    has_aspa = await rpki_console.has_aspa(asn)
+            except Exception:
+                logger.debug("Could not check ASPA for AS%d", asn)
+
+            # ROV coverage
+            rov_report = None
+            try:
+                if prefixes:
+                    routes = await client.get_bgp_state(prefixes[0])
+                    if routes:
+                        rov_analyzer = get_rov_coverage_analyzer()
+                        rov_report = rov_analyzer.analyze_prefix_coverage(prefixes[0], routes)
+            except Exception:
+                logger.debug("Could not fetch ROV data for AS%d", asn)
+
+            # Contacts from PeeringDB
+            contacts = None
+            try:
+                peeringdb = await get_peeringdb()
+                if peeringdb is not None:
+                    net = peeringdb.get_network_by_asn(asn)
+                    if net:
+                        contacts = net
+            except Exception:
+                logger.debug("Could not fetch contacts for AS%d", asn)
+
+            # WHOIS data from RIPE Stat
+            whois_data = None
+            try:
+                whois_data = await client.get_whois(str(asn))
+            except Exception:
+                logger.debug("Could not fetch WHOIS data for AS%d", asn)
+
+            report = auditor.audit_manrs(
+                asn=asn,
+                rpki_coverage=rpki_coverage,
+                has_aspa=has_aspa,
+                rov_report=rov_report,
+                contacts=contacts,
+                whois_data=whois_data,
+            )
+            if output_format == "json":
+                import json
+
+                return json.dumps(report.to_dict(), indent=2)
+            return auditor.format_report(report)
+
+        # DORA/NIS2/both require monocle
+        monocle = await get_monocle()
+        if monocle is None:
+            return (
+                "Monocle is not configured. Compliance audit requires "
+                "Monocle for AS relationship data. Install with: cargo install monocle"
+            )
+
+        peeringdb = await get_peeringdb()
+        if peeringdb is None:
+            return (
+                "PeeringDB is not configured. Compliance audit requires "
+                "PeeringDB for IXP presence data."
+            )
         # --- Gather resilience data (required) ---
         assessor = get_resilience_assessor()
 
@@ -2865,7 +2954,6 @@ async def run_compliance_audit(
 
         # --- Run audit ---
         auditor = get_compliance_auditor()
-        fw = framework.lower()
 
         if fw == "dora":
             report = auditor.audit_dora(

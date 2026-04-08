@@ -820,3 +820,29 @@ class TestGetMANRSStatus:
             result = await mcp_server.get_manrs_status(asn=99999)
 
         assert "not found" in result.lower() or "not a MANRS" in result
+
+
+class TestComplianceAuditMANRS:
+    """Tests for MANRS support in run_compliance_audit."""
+
+    @pytest.mark.asyncio
+    async def test_manrs_framework(self):
+        """run_compliance_audit accepts framework='manrs'."""
+        mock_ripe = AsyncMock()
+        mock_ripe.get_announced_prefixes = AsyncMock(return_value=["1.0.0.0/24"])
+        mock_ripe.get_rpki_validation = AsyncMock(return_value="valid")
+        mock_ripe.get_bgp_state = AsyncMock(return_value=[])
+        mock_ripe.get_whois = AsyncMock(return_value={})
+
+        mock_rpki = AsyncMock()
+        mock_rpki.has_aspa = AsyncMock(return_value=False)
+
+        with (
+            patch.object(mcp_server, "get_ripe_stat", return_value=mock_ripe),
+            patch.object(mcp_server, "get_rpki_console", return_value=mock_rpki),
+            patch.object(mcp_server, "get_peeringdb", return_value=None),
+        ):
+            result = await mcp_server.run_compliance_audit(asn=64496, framework="manrs")
+
+        assert "MANRS" in result
+        assert "AS64496" in result
