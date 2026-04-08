@@ -719,7 +719,7 @@ class TestVerifyAspaPath:
 
 
 class TestCheckMANRSReadiness:
-    """Tests for check_manrs_readiness MCP tool."""
+    """Tests for check_manrs MCP tool."""
 
     @pytest.mark.asyncio
     async def test_basic_assessment(self):
@@ -742,7 +742,7 @@ class TestCheckMANRSReadiness:
             patch.object(mcp_server, "get_rpki_console", return_value=mock_rpki),
             patch.object(mcp_server, "get_peeringdb", return_value=mock_peeringdb),
         ):
-            result = await mcp_server.check_manrs_readiness(asn=64496)
+            result = await mcp_server.check_manrs(asn=64496)
 
         assert "MANRS" in result
         assert "AS64496" in result
@@ -762,7 +762,7 @@ class TestCheckMANRSReadiness:
             patch.object(mcp_server, "get_rpki_console", return_value=mock_rpki),
             patch.object(mcp_server, "get_peeringdb", return_value=None),
         ):
-            result = await mcp_server.check_manrs_readiness(asn=64496, output_format="json")
+            result = await mcp_server.check_manrs(asn=64496, output_format="json")
 
         data = json.loads(result)
         assert data["asn"] == 64496
@@ -771,16 +771,16 @@ class TestCheckMANRSReadiness:
 
 
 class TestGetMANRSStatus:
-    """Tests for get_manrs_status MCP tool."""
+    """Tests for get_manrs_info MCP tool."""
 
     @pytest.mark.asyncio
     async def test_no_api_key(self):
         """Tool returns helpful message when no API key configured."""
         with patch.object(mcp_server, "get_manrs_client", return_value=None):
-            result = await mcp_server.get_manrs_status(asn=13335)
+            result = await mcp_server.get_manrs_info(asn=13335)
 
         assert "MANRS_API_KEY" in result
-        assert "check_manrs_readiness" in result
+        assert "check_manrs" in result
 
     @pytest.mark.asyncio
     async def test_participant_found(self):
@@ -804,7 +804,7 @@ class TestGetMANRSStatus:
         )
 
         with patch.object(mcp_server, "get_manrs_client", return_value=mock_client):
-            result = await mcp_server.get_manrs_status(asn=13335)
+            result = await mcp_server.get_manrs_info(asn=13335)
 
         assert "AS13335" in result
         assert "Cloudflare" in result
@@ -817,7 +817,7 @@ class TestGetMANRSStatus:
         mock_client.get_asn_conformance = AsyncMock(return_value=None)
 
         with patch.object(mcp_server, "get_manrs_client", return_value=mock_client):
-            result = await mcp_server.get_manrs_status(asn=99999)
+            result = await mcp_server.get_manrs_info(asn=99999)
 
         assert "not found" in result.lower() or "not a MANRS" in result
 

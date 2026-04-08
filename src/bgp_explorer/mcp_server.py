@@ -72,8 +72,9 @@ Key guidelines:
 - For ASPA guidance (recommended provider set), use get_aspa_guidance
 - For combined ROV+ASPA per-route validation, use validate_prefix_routes
 - For looking glass queries (vantage point routing), use query_looking_glass
-- For MANRS readiness self-assessment (no API key needed), use check_manrs_readiness
-- For official MANRS Observatory conformance data, use get_manrs_status
+- For MANRS readiness, MANRS compliance, or routing security posture, use check_manrs
+- For official MANRS Observatory status or "is this ASN a MANRS participant", use get_manrs_info
+- For MANRS compliance audit (scoring per action), use run_compliance_audit with framework='manrs'
 """,
 )
 
@@ -3528,7 +3529,7 @@ async def validate_prefix_routes(
 
 
 @mcp.tool()
-async def check_manrs_readiness(
+async def check_manrs(
     asn: Annotated[
         int, Field(description="Autonomous System Number to assess (e.g., 13335 for Cloudflare)")
     ],
@@ -3546,7 +3547,7 @@ async def check_manrs_readiness(
     - Action 4 (Validation): RPKI ROA/ASPA deployment
 
     This is a self-assessment tool — shows what can be verified externally.
-    Use get_manrs_status for official MANRS Observatory conformance data.
+    Use get_manrs_info for official MANRS Observatory conformance data.
 
     Does NOT require MANRS API key — uses existing data sources only.
     """
@@ -3627,7 +3628,7 @@ async def check_manrs_readiness(
 
 
 @mcp.tool()
-async def get_manrs_status(
+async def get_manrs_info(
     asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
 ) -> str:
     """Get official MANRS Observatory conformance status for an ASN.
@@ -3640,7 +3641,7 @@ async def get_manrs_status(
     Requires: MANRS_API_KEY environment variable.
 
     For a self-assessment using local data (no API key needed),
-    use check_manrs_readiness instead.
+    use check_manrs instead.
     """
     try:
         client = await get_manrs_client()
@@ -3648,7 +3649,7 @@ async def get_manrs_status(
             return (
                 "MANRS API key not configured. Set MANRS_API_KEY environment variable.\n"
                 "Register free at https://manrs.org/resources/api/\n\n"
-                "Tip: Use check_manrs_readiness for a local assessment without the API."
+                "Tip: Use check_manrs for a local assessment without the API."
             )
 
         conformance = await client.get_asn_conformance(asn)
@@ -3656,7 +3657,7 @@ async def get_manrs_status(
             return (
                 f"AS{asn} not found in MANRS Observatory data.\n"
                 f"This ASN may not be a MANRS participant.\n\n"
-                f"Use check_manrs_readiness for a local self-assessment instead."
+                f"Use check_manrs for a local self-assessment instead."
             )
 
         lines = [
