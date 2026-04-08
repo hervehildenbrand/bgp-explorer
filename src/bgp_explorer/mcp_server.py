@@ -25,6 +25,8 @@ import sys
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
+from collections.abc import Awaitable, Callable
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
@@ -50,6 +52,45 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Section-based tool infrastructure
+# =============================================================================
+
+
+def parse_sections(
+    sections: list[str] | None,
+    valid_sections: set[str],
+    default_sections: list[str],
+) -> list[str] | str:
+    """Parse and validate sections parameter.
+
+    Returns list of sections to render, or an error string if invalid.
+    """
+    if not sections:
+        return default_sections
+    invalid = set(sections) - valid_sections
+    if invalid:
+        return (
+            f"Invalid section(s): {', '.join(sorted(invalid))}. "
+            f"Valid sections: {', '.join(sorted(valid_sections))}"
+        )
+    return sections
+
+
+async def build_response(
+    sections: list[str],
+    handlers: dict[str, Callable[[], Awaitable[list[str]]]],
+) -> str:
+    """Build response by calling section handlers in order."""
+    output: list[str] = []
+    for section in sections:
+        if section in handlers:
+            section_output = await handlers[section]()
+            output.extend(section_output)
+    return "\n".join(output)
+
 
 # Create MCP server
 mcp = FastMCP(
