@@ -27,8 +27,18 @@ CACHE_TTL_SECONDS = 3600  # 1 hour
 
 def _parse_readiness(value: str) -> MANRSReadiness:
     """Parse a MANRS readiness string to enum, defaulting to UNKNOWN."""
+    if not value:
+        return MANRSReadiness.UNKNOWN
+    v = value.lower().strip()
+    # Map conformance terms to readiness
+    if v == "conformant":
+        return MANRSReadiness.READY
+    if v == "non-conformant":
+        return MANRSReadiness.LAGGING
+    if v == "no-data":
+        return MANRSReadiness.UNKNOWN
     try:
-        return MANRSReadiness(value.lower())
+        return MANRSReadiness(v)
     except (ValueError, AttributeError):
         return MANRSReadiness.UNKNOWN
 
@@ -110,24 +120,75 @@ class MANRSClient(DataSource):
         if data is None:
             return []
 
-        self._conformance_cache = [self._parse_conformance(entry) for entry in data]
+        # Real API returns {"participants": [...]}
+        participants = data.get("participants", data) if isinstance(data, dict) else data
+
+        result: list[MANRSConformance] = []
+        for entry in participants:
+            # Each participant may have multiple ASNs
+            asns = entry.get("ASNs", [])
+            if not asns and "asn" in entry:
+                asns = [entry["asn"]]
+            for asn in asns:
+                result.append(self._parse_conformance(entry, asn))
+
+        self._conformance_cache = result
         self._conformance_fetched = time.time()
         logger.info("Loaded %d MANRS conformance entries", len(self._conformance_cache))
         return self._conformance_cache
 
     @staticmethod
-    def _parse_conformance(entry: dict[str, Any]) -> MANRSConformance:
+    def _extract_action_readiness(action_data: Any) -> MANRSReadiness:
+        """Extract readiness from an action's data structure."""
+        if isinstance(action_data, str):
+            return _parse_readiness(action_data)
+        if isinstance(action_data, dict):
+            # Try score.severity first, then conformance
+            score = action_data.get("score")
+            if isinstance(score, dict):
+                return _parse_readiness(score.get("severity", ""))
+            return _parse_readiness(action_data.get("conformance", ""))
+        return MANRSReadiness.UNKNOWN
+
+    @staticmethod
+    def _extract_validation_readiness(routing_info: Any) -> MANRSReadiness:
+        """Extract validation readiness from routing_information structure."""
+        if not isinstance(routing_info, dict):
+            return MANRSReadiness.UNKNOWN
+        # Combine IRR and RPKI scores — use the worse one
+        rpki = routing_info.get("score_rpki", {})
+        irr = routing_info.get("score_irr", {})
+        rpki_sev = rpki.get("severity", "") if isinstance(rpki, dict) else ""
+        irr_sev = irr.get("severity", "") if isinstance(irr, dict) else ""
+        rpki_r = _parse_readiness(rpki_sev)
+        irr_r = _parse_readiness(irr_sev)
+        # Return worst of the two
+        order = [
+            MANRSReadiness.LAGGING,
+            MANRSReadiness.UNKNOWN,
+            MANRSReadiness.ASPIRING,
+            MANRSReadiness.READY,
+        ]
+        return min(rpki_r, irr_r, key=lambda x: order.index(x))
+
+    @classmethod
+    def _parse_conformance(cls, entry: dict[str, Any], asn: int) -> MANRSConformance:
         """Parse a single conformance entry from the API."""
+        areas = entry.get("areas_served", [])
+        country = areas[0] if areas else entry.get("country", "")
+
         return MANRSConformance(
-            asn=int(entry.get("asn", 0)),
+            asn=asn,
             name=entry.get("name", ""),
-            country=entry.get("country", ""),
-            status=entry.get("status", "unknown"),
-            action1_filtering=_parse_readiness(entry.get("action_1", "")),
-            action2_anti_spoofing=_parse_readiness(entry.get("action_2", "")),
-            action3_coordination=_parse_readiness(entry.get("action_3", "")),
-            action4_validation=_parse_readiness(entry.get("action_4", "")),
-            last_updated=entry.get("last_updated", ""),
+            country=country,
+            status=entry.get("filtering", {}).get("conformance", "unknown")
+            if isinstance(entry.get("filtering"), dict)
+            else entry.get("status", "unknown"),
+            action1_filtering=cls._extract_action_readiness(entry.get("filtering")),
+            action2_anti_spoofing=cls._extract_action_readiness(entry.get("anti_spoofing")),
+            action3_coordination=cls._extract_action_readiness(entry.get("coordination")),
+            action4_validation=cls._extract_validation_readiness(entry.get("routing_information")),
+            last_updated=entry.get("member_since", entry.get("last_updated", "")),
             manrs_participant=True,
         )
 

@@ -6,30 +6,53 @@ from aioresponses import aioresponses
 from bgp_explorer.models.manrs import MANRSReadiness
 from bgp_explorer.sources.manrs import MANRS_API_URL, MANRSClient
 
-SAMPLE_CONFORMANCE_RESPONSE = [
-    {
-        "asn": 13335,
-        "name": "Cloudflare, Inc.",
-        "country": "US",
-        "status": "ready",
-        "action_1": "ready",
-        "action_2": "ready",
-        "action_3": "ready",
-        "action_4": "ready",
-        "last_updated": "2026-04-01T00:00:00Z",
-    },
-    {
-        "asn": 15169,
-        "name": "Google LLC",
-        "country": "US",
-        "status": "ready",
-        "action_1": "ready",
-        "action_2": "aspiring",
-        "action_3": "ready",
-        "action_4": "ready",
-        "last_updated": "2026-04-01T00:00:00Z",
-    },
-]
+# Real MANRS API format: {"participants": [...]}
+SAMPLE_CONFORMANCE_RESPONSE = {
+    "participants": [
+        {
+            "id": 1001,
+            "name": "Cloudflare, Inc.",
+            "areas_served": ["US"],
+            "ASNs": [13335],
+            "member_since": "2020-01-15",
+            "filtering": {"conformance": "conformant"},
+            "anti_spoofing": {
+                "conformance": "conformant",
+                "score": {"value": 1, "severity": "ready"},
+            },
+            "coordination": {
+                "conformance": "conformant",
+                "score": {"value": 1, "severity": "ready"},
+            },
+            "routing_information": {
+                "conformance": "conformant",
+                "score_irr": {"value": 1, "severity": "ready"},
+                "score_rpki": {"value": 1, "severity": "ready"},
+            },
+        },
+        {
+            "id": 1002,
+            "name": "Google LLC",
+            "areas_served": ["US"],
+            "ASNs": [15169],
+            "member_since": "2019-06-01",
+            "filtering": {"conformance": "conformant"},
+            "anti_spoofing": {
+                "conformance": "conformant",
+                "score": {"value": 0.5, "severity": "aspiring"},
+            },
+            "coordination": {
+                "conformance": "conformant",
+                "score": {"value": 1, "severity": "ready"},
+            },
+            "routing_information": {
+                "conformance": "conformant",
+                "score_irr": {"value": 1, "severity": "ready"},
+                "score_rpki": {"value": 1, "severity": "ready"},
+            },
+        },
+    ]
+}
 
 SAMPLE_ROA_RESPONSE = {
     "asn": 13335,
@@ -176,19 +199,31 @@ class TestMANRSClient:
 
     @pytest.mark.asyncio
     async def test_unknown_readiness_parsed(self, client):
-        weird_response = [
-            {
-                "asn": 64496,
-                "name": "Test",
-                "country": "XX",
-                "status": "unknown",
-                "action_1": "something_new",
-                "action_2": "lagging",
-                "action_3": "lagging",
-                "action_4": "lagging",
-                "last_updated": "",
-            },
-        ]
+        """Test parsing unknown/unexpected readiness values."""
+        weird_response = {
+            "participants": [
+                {
+                    "name": "Test",
+                    "areas_served": ["XX"],
+                    "ASNs": [64496],
+                    "member_since": "",
+                    "filtering": {"conformance": "something_new"},
+                    "anti_spoofing": {
+                        "conformance": "non-conformant",
+                        "score": {"value": 0, "severity": "lagging"},
+                    },
+                    "coordination": {
+                        "conformance": "conformant",
+                        "score": {"value": 0, "severity": "lagging"},
+                    },
+                    "routing_information": {
+                        "conformance": "non-conformant",
+                        "score_irr": {"value": 0, "severity": "lagging"},
+                        "score_rpki": {"value": 0, "severity": "lagging"},
+                    },
+                },
+            ]
+        }
         with aioresponses() as m:
             m.get(
                 f"{MANRS_API_URL}/conformance/net-ops",
@@ -198,3 +233,20 @@ class TestMANRSClient:
                 result = await client.get_asn_conformance(64496)
             assert result is not None
             assert result.action1_filtering == MANRSReadiness.UNKNOWN
+
+    @pytest.mark.asyncio
+    async def test_real_api_format(self, client):
+        """Test parsing the real MANRS API response format."""
+        with aioresponses() as m:
+            m.get(
+                f"{MANRS_API_URL}/conformance/net-ops",
+                payload=SAMPLE_CONFORMANCE_RESPONSE,
+            )
+            async with client:
+                result = await client.get_asn_conformance(13335)
+            assert result is not None
+            assert result.name == "Cloudflare, Inc."
+            assert result.country == "US"
+            assert result.action2_anti_spoofing == MANRSReadiness.READY
+            assert result.action3_coordination == MANRSReadiness.READY
+            assert result.action4_validation == MANRSReadiness.READY
