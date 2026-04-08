@@ -59,22 +59,12 @@ mcp = FastMCP(
 Use these tools to investigate BGP routing, analyze AS relationships,
 detect anomalies, and probe network connectivity from global vantage points.
 
-Key guidelines:
+Workflow:
 - When investigating a network by name, use search_asn FIRST to find the ASN
-- For peer counts, use get_as_peers (NOT path analysis metrics)
-- For connectivity overview, use get_as_connectivity_summary
-- For hijack detection, use check_prefix_anomalies
-- For WHOIS/IRR data (route objects, aut-num, abuse contacts), use get_whois_data
-- For route stability/flapping, use get_prefix_stability
-- For ROV deployment coverage, use analyze_rov_coverage
-- For ASPA status (published ASPA objects), use get_aspa_status
-- For ROA guidance (missing ROAs, maxLength issues), use get_roa_guidance
-- For ASPA guidance (recommended provider set), use get_aspa_guidance
-- For combined ROV+ASPA per-route validation, use validate_prefix_routes
-- For looking glass queries (vantage point routing), use query_looking_glass
-- For MANRS readiness, MANRS compliance, or routing security posture, use check_manrs
-- For official MANRS Observatory status or "is this ASN a MANRS participant", use get_manrs_info
-- For MANRS compliance audit (scoring per action), use run_compliance_audit with framework='manrs'
+- For a network report, start with get_asn_details, then add specific checks as needed
+- For peer/upstream/downstream counts, use get_as_peers/get_as_upstreams/get_as_downstreams
+- Only use MANRS tools (check_manrs, get_manrs_info) when the user explicitly asks about MANRS
+- Only use compliance tools (run_compliance_audit) when the user explicitly asks about compliance, DORA, NIS2, or MANRS audit
 """,
 )
 
