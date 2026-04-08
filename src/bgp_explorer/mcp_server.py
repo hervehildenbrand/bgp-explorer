@@ -31,6 +31,7 @@ from pydantic import Field
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
 from bgp_explorer.analysis.aspa_validation import ASPAValidator, create_aspa_validator
 from bgp_explorer.analysis.compliance import ComplianceAuditor
+from bgp_explorer.analysis.manrs_conformance import MANRSReadinessAssessor
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
 from bgp_explorer.analysis.rov_coverage import ROVCoverageAnalyzer
@@ -70,6 +71,8 @@ Key guidelines:
 - For ASPA guidance (recommended provider set), use get_aspa_guidance
 - For combined ROV+ASPA per-route validation, use validate_prefix_routes
 - For looking glass queries (vantage point routing), use query_looking_glass
+- For MANRS readiness self-assessment (no API key needed), use check_manrs_readiness
+- For official MANRS Observatory conformance data, use get_manrs_status
 """,
 )
 
@@ -86,6 +89,7 @@ _stability_analyzer: StabilityAnalyzer | None = None
 _rov_coverage_analyzer: ROVCoverageAnalyzer | None = None
 _compliance_auditor: ComplianceAuditor | None = None
 _rpki_console: RpkiConsoleClient | None = None
+_manrs_assessor: MANRSReadinessAssessor | None = None
 
 
 def get_stability_analyzer() -> StabilityAnalyzer:
@@ -110,6 +114,14 @@ def get_compliance_auditor() -> ComplianceAuditor:
     if _compliance_auditor is None:
         _compliance_auditor = ComplianceAuditor()
     return _compliance_auditor
+
+
+def get_manrs_assessor() -> MANRSReadinessAssessor:
+    """Get or create MANRSReadinessAssessor."""
+    global _manrs_assessor
+    if _manrs_assessor is None:
+        _manrs_assessor = MANRSReadinessAssessor()
+    return _manrs_assessor
 
 
 async def get_ripe_stat() -> RipeStatClient:
@@ -3402,6 +3414,109 @@ async def validate_prefix_routes(
 
     except Exception as e:
         return f"Error validating routes for {prefix}: {e}"
+
+
+# =============================================================================
+# MANRS Readiness Assessment
+# =============================================================================
+
+
+@mcp.tool()
+async def check_manrs_readiness(
+    asn: Annotated[
+        int, Field(description="Autonomous System Number to assess (e.g., 13335 for Cloudflare)")
+    ],
+    output_format: Annotated[
+        str,
+        Field(description="Output format: 'text' or 'json' (default: 'text')"),
+    ] = "text",
+) -> str:
+    """Assess MANRS (Mutually Agreed Norms for Routing Security) readiness.
+
+    Evaluates the 4 MANRS Actions using locally available data:
+    - Action 1 (Filtering): Proxy via ROV coverage and RPKI deployment
+    - Action 2 (Anti-Spoofing): Cannot be verified externally (marked unknown)
+    - Action 3 (Coordination): Contact info in PeeringDB/WHOIS
+    - Action 4 (Validation): RPKI ROA/ASPA deployment
+
+    This is a self-assessment tool — shows what can be verified externally.
+    Use get_manrs_status for official MANRS Observatory conformance data.
+
+    Does NOT require MANRS API key — uses existing data sources only.
+    """
+    try:
+        client = await get_ripe_stat()
+
+        # Gather RPKI coverage
+        rpki_coverage = None
+        prefixes = []
+        try:
+            prefixes = await client.get_announced_prefixes(asn)
+            if prefixes:
+                valid_count = 0
+                checked = 0
+                for prefix in prefixes:
+                    try:
+                        status = await client.get_rpki_validation(prefix, asn)
+                        checked += 1
+                        if status == "valid":
+                            valid_count += 1
+                    except Exception:
+                        pass
+                if checked > 0:
+                    rpki_coverage = valid_count / checked
+        except Exception:
+            logger.debug("Could not fetch RPKI data for AS%d", asn)
+
+        # Check ASPA status
+        has_aspa: bool | None = None
+        try:
+            rpki_console = await get_rpki_console()
+            if rpki_console is not None:
+                has_aspa = await rpki_console.has_aspa(asn)
+        except Exception:
+            logger.debug("Could not check ASPA for AS%d", asn)
+
+        # Gather ROV coverage
+        rov_report = None
+        try:
+            if prefixes:
+                routes = await client.get_bgp_state(prefixes[0])
+                if routes:
+                    rov_analyzer = get_rov_coverage_analyzer()
+                    rov_report = rov_analyzer.analyze_prefix_coverage(prefixes[0], routes)
+        except Exception:
+            logger.debug("Could not fetch ROV data for AS%d", asn)
+
+        # Gather contacts
+        contacts = None
+        try:
+            peeringdb = await get_peeringdb()
+            if peeringdb is not None:
+                net = peeringdb.get_network_by_asn(asn)
+                if net:
+                    contacts = net
+        except Exception:
+            logger.debug("Could not fetch PeeringDB contacts for AS%d", asn)
+
+        # Run assessment
+        assessor = get_manrs_assessor()
+        report = assessor.assess(
+            asn=asn,
+            rpki_coverage=rpki_coverage,
+            has_aspa=has_aspa,
+            rov_report=rov_report,
+            contacts=contacts,
+        )
+
+        if output_format == "json":
+            import json
+
+            return json.dumps(report.to_dict(), indent=2)
+        return assessor.format_report(report)
+
+    except Exception as e:
+        return f"Error assessing MANRS readiness for AS{asn}: {e}"
 
 
 # =============================================================================
