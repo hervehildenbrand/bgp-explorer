@@ -3715,6 +3715,374 @@ async def get_manrs_info(
 
 
 # =============================================================================
+# Consolidated Tools (composite, section-based)
+# =============================================================================
+
+
+@mcp.tool()
+async def investigate_asn(
+    asn: Annotated[
+        int, Field(description="Autonomous System Number to investigate (e.g., 15169 for Google)")
+    ],
+    sections: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Sections to include: summary, connectivity, announcements, "
+                "contacts, resilience, whois. Default: summary only."
+            ),
+            default=None,
+        ),
+    ] = None,
+    related_asn: Annotated[
+        int | None,
+        Field(
+            description="Optional ASN to check relationship with",
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """Investigate an Autonomous System — the primary tool for ASN queries.
+
+    Returns a summary by default (name, prefix counts, connectivity counts).
+    Use the sections parameter to expand specific areas:
+    - summary: Name, prefix counts (IPv4/IPv6), upstream/peer/downstream counts
+    - connectivity: Full upstream/peer/downstream lists with visibility %
+    - announcements: All announced prefixes
+    - contacts: NOC/abuse/technical contacts from PeeringDB
+    - resilience: Network resilience score with recommendations
+    - whois: WHOIS/IRR registration data
+
+    Use related_asn to check the relationship between two ASNs.
+
+    Replaces: get_asn_details, get_as_connectivity_summary, get_as_peers,
+    get_as_upstreams, get_as_downstreams, check_as_relationship,
+    get_asn_announcements, get_whois_data, get_network_contacts,
+    assess_network_resilience.
+    """
+    VALID = {"summary", "connectivity", "announcements", "contacts", "resilience", "whois"}
+    requested = parse_sections(sections, VALID, ["summary"])
+    if isinstance(requested, str):
+        return requested
+
+    try:
+        client = await get_ripe_stat()
+        monocle = await get_monocle()
+
+        # Shared data (lazy-fetched, cached across sections)
+        _prefixes: list[str] | None = None
+        _connectivity = None
+        _overview: dict | None = None
+
+        async def _get_prefixes():
+            nonlocal _prefixes
+            if _prefixes is None:
+                _prefixes = await client.get_announced_prefixes(asn)
+            return _prefixes
+
+        async def _get_connectivity():
+            nonlocal _connectivity
+            if _connectivity is None and monocle is not None:
+                _connectivity = await monocle.get_connectivity(asn)
+            return _connectivity
+
+        async def _get_overview():
+            nonlocal _overview
+            if _overview is None:
+                try:
+                    _overview = await client.get_as_overview(asn)
+                except Exception:
+                    _overview = {}
+            return _overview
+
+        # --- Section handlers ---
+
+        async def summary_section() -> list[str]:
+            overview = await _get_overview()
+            holder = overview.get("holder", "Unknown")
+            prefixes = await _get_prefixes()
+            ipv4 = [p for p in prefixes if ":" not in p]
+            ipv6 = [p for p in prefixes if ":" in p]
+
+            lines = [
+                f"**AS{asn} Summary**",
+                f"**Name:** {holder}",
+                "",
+                f"**Prefixes:** {len(prefixes)} total ({len(ipv4)} IPv4, {len(ipv6)} IPv6)",
+            ]
+
+            connectivity = await _get_connectivity()
+            if connectivity is not None:
+                lines.append(
+                    f"**Upstreams:** {len(connectivity.upstreams)} | "
+                    f"**Peers:** {len(connectivity.peers)} | "
+                    f"**Downstreams:** {len(connectivity.downstreams)}"
+                )
+            lines.append("")
+            return lines
+
+        async def connectivity_section() -> list[str]:
+            connectivity = await _get_connectivity()
+            if connectivity is None:
+                return ["Monocle not available — install with: cargo install monocle", ""]
+
+            lines = [
+                f"**AS{asn} Connectivity**",
+                f"**Total neighbors:** {connectivity.total_neighbors} "
+                f"(observed from {connectivity.max_visibility} BGP peers)",
+                "",
+            ]
+
+            # Upstreams
+            lines.append(f"**Upstreams ({len(connectivity.upstreams)}):**")
+            for u in connectivity.upstreams[:20]:
+                name_str = f" {u.name}" if u.name else ""
+                lines.append(f"  - AS{u.asn}{name_str} ({u.peers_percent:.1f}% visibility)")
+            if len(connectivity.upstreams) > 20:
+                lines.append(f"  ... and {len(connectivity.upstreams) - 20} more")
+            lines.append("")
+
+            # Peers
+            lines.append(f"**Peers ({len(connectivity.peers)}):**")
+            for p in connectivity.peers[:20]:
+                name_str = f" {p.name}" if p.name else ""
+                lines.append(f"  - AS{p.asn}{name_str} ({p.peers_percent:.1f}% visibility)")
+            if len(connectivity.peers) > 20:
+                lines.append(f"  ... and {len(connectivity.peers) - 20} more")
+            lines.append("")
+
+            # Downstreams
+            lines.append(f"**Downstreams ({len(connectivity.downstreams)}):**")
+            for d in connectivity.downstreams[:20]:
+                name_str = f" {d.name}" if d.name else ""
+                lines.append(f"  - AS{d.asn}{name_str} ({d.peers_percent:.1f}% visibility)")
+            if len(connectivity.downstreams) > 20:
+                lines.append(f"  ... and {len(connectivity.downstreams) - 20} more")
+            lines.append("")
+
+            return lines
+
+        async def announcements_section() -> list[str]:
+            prefixes = await _get_prefixes()
+            if not prefixes:
+                return [f"AS{asn} is not announcing any prefixes.", ""]
+
+            ipv4 = [p for p in prefixes if ":" not in p]
+            ipv6 = [p for p in prefixes if ":" in p]
+
+            lines = [
+                f"**AS{asn} Announcements**",
+                f"**Total:** {len(prefixes)} ({len(ipv4)} IPv4, {len(ipv6)} IPv6)",
+                "",
+            ]
+
+            if ipv4:
+                lines.append("**IPv4:**")
+                for p in ipv4[:15]:
+                    lines.append(f"  - {p}")
+                if len(ipv4) > 15:
+                    lines.append(f"  ... and {len(ipv4) - 15} more")
+                lines.append("")
+
+            if ipv6:
+                lines.append("**IPv6:**")
+                for p in ipv6[:10]:
+                    lines.append(f"  - {p}")
+                if len(ipv6) > 10:
+                    lines.append(f"  ... and {len(ipv6) - 10} more")
+                lines.append("")
+
+            return lines
+
+        async def contacts_section() -> list[str]:
+            peeringdb = await get_peeringdb()
+            if peeringdb is None:
+                return ["PeeringDB not available.", ""]
+
+            network = peeringdb.get_network_info(asn)
+            contacts = peeringdb.get_network_contacts(asn)
+
+            if not network:
+                return [f"AS{asn} not found in PeeringDB.", ""]
+
+            lines = [f"**AS{asn} Contacts**", f"**Network:** {network.name}", ""]
+
+            if not contacts:
+                lines.append("No public contact information in PeeringDB.")
+                if network.website:
+                    lines.append(f"**Website:** {network.website}")
+                lines.append("")
+                return lines
+
+            by_role: dict[str, list] = {}
+            for contact in contacts:
+                role = contact.role or "Other"
+                by_role.setdefault(role, []).append(contact)
+
+            for role in ["NOC", "Abuse", "Technical", "Policy", "Sales"]:
+                if role in by_role:
+                    lines.append(f"**{role}:**")
+                    for c in by_role.pop(role):
+                        if c.name:
+                            lines.append(f"  - Name: {c.name}")
+                        if c.email:
+                            lines.append(f"  - Email: {c.email}")
+                        if c.phone:
+                            lines.append(f"  - Phone: {c.phone}")
+                    lines.append("")
+
+            for role, role_contacts in sorted(by_role.items()):
+                lines.append(f"**{role}:**")
+                for c in role_contacts:
+                    if c.name:
+                        lines.append(f"  - Name: {c.name}")
+                    if c.email:
+                        lines.append(f"  - Email: {c.email}")
+                lines.append("")
+
+            if network.website:
+                lines.append(f"**Website:** {network.website}")
+                lines.append("")
+
+            return lines
+
+        async def resilience_section() -> list[str]:
+            if monocle is None:
+                return ["Monocle not available — install with: cargo install monocle", ""]
+
+            peeringdb = await get_peeringdb()
+            if peeringdb is None:
+                return ["PeeringDB not available for resilience assessment.", ""]
+
+            assessor = get_resilience_assessor()
+
+            upstreams = await monocle.get_as_upstreams(asn)
+            peers = await monocle.get_as_peers(asn)
+            downstreams = await monocle.get_as_downstreams(asn)
+            ixps = peeringdb.get_ixps_for_asn(asn)
+
+            peering_score, peer_count = assessor._score_peering(peers)
+            transit_score, transit_issues = assessor._score_transit(
+                upstreams, peer_count=peer_count, downstream_count=len(downstreams)
+            )
+            ixp_score, ixp_names = assessor._score_ixp(ixps)
+
+            scores = {
+                "transit": transit_score,
+                "peering": peering_score,
+                "ixp": ixp_score,
+                "path_redundancy": transit_score,
+            }
+            flags = {
+                "single_transit": len(upstreams) == 1,
+                "ddos_provider": assessor._detect_ddos_provider(upstreams),
+            }
+            final_score = assessor._calculate_final_score(scores, flags)
+
+            upstream_names = []
+            for u in upstreams[:10]:
+                name = f"AS{u.asn2}"
+                if u.asn2_name:
+                    name += f" ({u.asn2_name})"
+                upstream_names.append(name)
+
+            report = ResilienceReport(
+                asn=asn,
+                score=final_score,
+                transit_score=transit_score,
+                peering_score=peering_score,
+                ixp_score=ixp_score,
+                path_redundancy_score=transit_score,
+                upstream_count=len(upstreams),
+                peer_count=peer_count,
+                ixp_count=len(ixps),
+                upstreams=upstream_names,
+                ixps=ixp_names,
+                issues=transit_issues,
+                recommendations=[],
+                single_transit=len(upstreams) == 1,
+                ddos_provider_detected=assessor._detect_ddos_provider(upstreams),
+            )
+            report.recommendations = assessor._generate_recommendations(report)
+
+            return [assessor.format_report(report), ""]
+
+        async def whois_section() -> list[str]:
+            data = await client.get_whois_data(f"AS{asn}")
+
+            records = data.get("records", [])
+            irr_records = data.get("irr_records", [])
+            authorities = data.get("authorities", [])
+
+            lines = [f"**WHOIS Data for AS{asn}**", ""]
+
+            if authorities:
+                lines.append(f"**Registry:** {', '.join(a.upper() for a in authorities)}")
+                lines.append("")
+
+            if records:
+                lines.append("**Registration:**")
+                for record_group in records:
+                    for entry in record_group:
+                        key = entry.get("key", "")
+                        value = entry.get("value", "")
+                        if key and value:
+                            lines.append(f"  - {key}: {value}")
+                lines.append("")
+
+            if irr_records:
+                lines.append(f"**IRR Route Objects ({len(irr_records)}):**")
+                for i, record_group in enumerate(irr_records, 1):
+                    parts = []
+                    for entry in record_group:
+                        key = entry.get("key", "")
+                        value = entry.get("value", "")
+                        if key and value:
+                            parts.append(f"{key}: {value}")
+                    if parts:
+                        lines.append(f"  {i}. {' | '.join(parts)}")
+            else:
+                lines.append("**IRR Records:** No IRR route objects found")
+
+            lines.append("")
+            return lines
+
+        # Build response
+        result = await build_response(
+            requested,
+            {
+                "summary": summary_section,
+                "connectivity": connectivity_section,
+                "announcements": announcements_section,
+                "contacts": contacts_section,
+                "resilience": resilience_section,
+                "whois": whois_section,
+            },
+        )
+
+        # Handle related_asn
+        if related_asn is not None and monocle is not None:
+            try:
+                rel = await monocle.check_relationship(asn, related_asn)
+                if rel:
+                    name_str = f" ({rel.asn2_name})" if rel.asn2_name else ""
+                    result += (
+                        f"\n**Relationship: AS{asn} <-> AS{related_asn}{name_str}**\n"
+                        f"**Type:** {rel.relationship_type.upper()}\n"
+                        f"**Visibility:** {rel.connected_pct:.1f}%\n"
+                    )
+                else:
+                    result += f"\nNo direct relationship found between AS{asn} and AS{related_asn}.\n"
+            except Exception as e:
+                result += f"\nError checking relationship: {e}\n"
+
+        return result
+
+    except Exception as e:
+        return f"Error investigating AS{asn}: {e}"
+
+
+# =============================================================================
 # Server Entry Point
 # =============================================================================
 
