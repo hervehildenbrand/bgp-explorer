@@ -2758,7 +2758,8 @@ async def run_compliance_audit(
                 if prefixes:
                     valid_count = 0
                     checked = 0
-                    for prefix in prefixes:
+                    # Limit to 20 prefixes to avoid timeout on large ASNs
+                    for prefix in prefixes[:20]:
                         try:
                             status = await client.get_rpki_validation(prefix, asn)
                             checked += 1
@@ -3560,7 +3561,8 @@ async def check_manrs_readiness(
             if prefixes:
                 valid_count = 0
                 checked = 0
-                for prefix in prefixes:
+                # Limit to 20 prefixes to avoid timeout on large ASNs
+                for prefix in prefixes[:20]:
                     try:
                         status = await client.get_rpki_validation(prefix, asn)
                         checked += 1
