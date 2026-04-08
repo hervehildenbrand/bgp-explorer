@@ -37,6 +37,7 @@ from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceRepor
 from bgp_explorer.analysis.rov_coverage import ROVCoverageAnalyzer
 from bgp_explorer.analysis.stability import StabilityAnalyzer
 from bgp_explorer.sources.globalping import GlobalpingClient
+from bgp_explorer.sources.manrs import MANRSClient
 from bgp_explorer.sources.monocle import MonocleClient
 from bgp_explorer.sources.peeringdb import PeeringDBClient
 from bgp_explorer.sources.ripe_stat import RipeStatClient
@@ -90,6 +91,7 @@ _rov_coverage_analyzer: ROVCoverageAnalyzer | None = None
 _compliance_auditor: ComplianceAuditor | None = None
 _rpki_console: RpkiConsoleClient | None = None
 _manrs_assessor: MANRSReadinessAssessor | None = None
+_manrs_client: MANRSClient | None = None
 
 
 def get_stability_analyzer() -> StabilityAnalyzer:
@@ -122,6 +124,21 @@ def get_manrs_assessor() -> MANRSReadinessAssessor:
     if _manrs_assessor is None:
         _manrs_assessor = MANRSReadinessAssessor()
     return _manrs_assessor
+
+
+async def get_manrs_client() -> MANRSClient | None:
+    """Get or create MANRSClient (lazy initialization)."""
+    global _manrs_client
+    if _manrs_client is None:
+        _manrs_client = MANRSClient()
+        if not _manrs_client.has_api_key():
+            return None
+        try:
+            await _manrs_client.connect()
+        except Exception:
+            logger.warning("Failed to connect to MANRS Observatory API")
+            return None
+    return _manrs_client
 
 
 async def get_ripe_stat() -> RipeStatClient:
@@ -3517,6 +3534,62 @@ async def check_manrs_readiness(
 
     except Exception as e:
         return f"Error assessing MANRS readiness for AS{asn}: {e}"
+
+
+@mcp.tool()
+async def get_manrs_status(
+    asn: Annotated[int, Field(description="Autonomous System Number (e.g., 13335 for Cloudflare)")],
+) -> str:
+    """Get official MANRS Observatory conformance status for an ASN.
+
+    Returns the official MANRS scoring from the MANRS Observatory:
+    - Participation status (whether ASN has joined MANRS)
+    - Per-action readiness: Ready/Aspiring/Lagging
+    - Organization and country info
+
+    Requires: MANRS_API_KEY environment variable.
+
+    For a self-assessment using local data (no API key needed),
+    use check_manrs_readiness instead.
+    """
+    try:
+        client = await get_manrs_client()
+        if client is None:
+            return (
+                "MANRS API key not configured. Set MANRS_API_KEY environment variable.\n"
+                "Register free at https://manrs.org/resources/api/\n\n"
+                "Tip: Use check_manrs_readiness for a local assessment without the API."
+            )
+
+        conformance = await client.get_asn_conformance(asn)
+        if conformance is None:
+            return (
+                f"AS{asn} not found in MANRS Observatory data.\n"
+                f"This ASN may not be a MANRS participant.\n\n"
+                f"Use check_manrs_readiness for a local self-assessment instead."
+            )
+
+        lines = [
+            f"**MANRS Observatory Status: AS{asn}**",
+            f"**Organization:** {conformance.name}",
+            f"**Country:** {conformance.country}",
+            "**MANRS Participant:** Yes",
+            f"**Overall Status:** {conformance.status.upper()}",
+            "",
+            "**Per-Action Readiness:**",
+            f"  - Action 1 (Filtering): {conformance.action1_filtering.value.upper()}",
+            f"  - Action 2 (Anti-Spoofing): {conformance.action2_anti_spoofing.value.upper()}",
+            f"  - Action 3 (Coordination): {conformance.action3_coordination.value.upper()}",
+            f"  - Action 4 (Validation): {conformance.action4_validation.value.upper()}",
+            "",
+            f"**Last Updated:** {conformance.last_updated}",
+            "",
+            "Data source: MANRS Observatory (observatory.manrs.org)",
+        ]
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error fetching MANRS status for AS{asn}: {e}"
 
 
 # =============================================================================

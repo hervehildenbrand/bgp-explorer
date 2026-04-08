@@ -768,3 +768,55 @@ class TestCheckMANRSReadiness:
         assert data["asn"] == 64496
         assert "overall_readiness" in data
         assert "action_findings" in data
+
+
+class TestGetMANRSStatus:
+    """Tests for get_manrs_status MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_no_api_key(self):
+        """Tool returns helpful message when no API key configured."""
+        with patch.object(mcp_server, "get_manrs_client", return_value=None):
+            result = await mcp_server.get_manrs_status(asn=13335)
+
+        assert "MANRS_API_KEY" in result
+        assert "check_manrs_readiness" in result
+
+    @pytest.mark.asyncio
+    async def test_participant_found(self):
+        """Tool returns conformance data for a MANRS participant."""
+        from bgp_explorer.models.manrs import MANRSConformance, MANRSReadiness
+
+        mock_client = AsyncMock()
+        mock_client.get_asn_conformance = AsyncMock(
+            return_value=MANRSConformance(
+                asn=13335,
+                name="Cloudflare, Inc.",
+                country="US",
+                status="ready",
+                action1_filtering=MANRSReadiness.READY,
+                action2_anti_spoofing=MANRSReadiness.READY,
+                action3_coordination=MANRSReadiness.READY,
+                action4_validation=MANRSReadiness.READY,
+                last_updated="2026-04-01",
+                manrs_participant=True,
+            )
+        )
+
+        with patch.object(mcp_server, "get_manrs_client", return_value=mock_client):
+            result = await mcp_server.get_manrs_status(asn=13335)
+
+        assert "AS13335" in result
+        assert "Cloudflare" in result
+        assert "READY" in result.upper()
+
+    @pytest.mark.asyncio
+    async def test_not_found(self):
+        """Tool returns appropriate message for non-participant."""
+        mock_client = AsyncMock()
+        mock_client.get_asn_conformance = AsyncMock(return_value=None)
+
+        with patch.object(mcp_server, "get_manrs_client", return_value=mock_client):
+            result = await mcp_server.get_manrs_status(asn=99999)
+
+        assert "not found" in result.lower() or "not a MANRS" in result
