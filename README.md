@@ -132,7 +132,33 @@ ANTHROPIC_API_KEY=your_anthropic_key_here
 
 # Optional: bgp-radar path (defaults to PATH lookup)
 BGP_RADAR_PATH=/path/to/bgp-radar
+
+# Optional: MANRS Observatory API key (for official conformance data)
+# Register free at https://manrs.org/resources/api/
+MANRS_API_KEY=your_manrs_api_key_here
 ```
+
+### Claude Desktop MCP Setup
+
+When using bgp-explorer as an MCP server in Claude Desktop, API keys must be added
+to the Claude Desktop config (`.env` is not read by the MCP process):
+
+```json
+// ~/Library/Application Support/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "bgp-explorer": {
+      "command": "/path/to/bgp-explorer/.venv/bin/bgp-explorer",
+      "args": ["mcp"],
+      "env": {
+        "MANRS_API_KEY": "your-manrs-api-key-here"
+      }
+    }
+  }
+}
+```
+
+> **Note:** Restart Claude Desktop after changing this file.
 
 ## Usage
 
