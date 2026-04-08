@@ -20,6 +20,7 @@ from bgp_explorer.analysis.stability import StabilityReport
 class ComplianceFramework(Enum):
     DORA = "DORA"
     NIS2 = "NIS2"
+    MANRS = "MANRS"
 
 
 class ComplianceLevel(Enum):
@@ -110,6 +111,18 @@ class ComplianceAuditReport:
             ],
             "summary": self.summary,
         }
+
+
+def _has_contacts(data: dict | None) -> bool:
+    """Check if contact data contains any actual contact info."""
+    if not data:
+        return False
+    for _key, value in data.items():
+        if value and isinstance(value, str) and "@" in value:
+            return True
+        if value and isinstance(value, list) and any(v for v in value):
+            return True
+    return False
 
 
 class ComplianceAuditor:
@@ -204,6 +217,63 @@ class ComplianceAuditor:
             has_aspa,
         )
         return dora, nis2
+
+    def audit_manrs(
+        self,
+        asn: int,
+        rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
+        rov_report: ROVCoverageReport | None = None,
+        contacts: dict | None = None,
+        whois_data: dict | None = None,
+    ) -> ComplianceAuditReport:
+        categories = [
+            self._check_manrs_filtering(rpki_coverage, rov_report),
+            self._check_manrs_anti_spoofing(),
+            self._check_manrs_coordination(contacts, whois_data),
+            self._check_manrs_validation(rpki_coverage, has_aspa),
+        ]
+        return self._build_report(asn, ComplianceFramework.MANRS, categories)
+
+    def audit_all(
+        self,
+        asn: int,
+        resilience_report: ResilienceReport,
+        stability_report: StabilityReport | None = None,
+        rov_report: ROVCoverageReport | None = None,
+        aspa_results: list[dict] | None = None,
+        contacts: dict | None = None,
+        rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
+        whois_data: dict | None = None,
+    ) -> tuple[ComplianceAuditReport, ComplianceAuditReport, ComplianceAuditReport]:
+        dora = self.audit_dora(
+            asn,
+            resilience_report,
+            stability_report,
+            rov_report,
+            contacts,
+            rpki_coverage,
+            has_aspa,
+        )
+        nis2 = self.audit_nis2(
+            asn,
+            resilience_report,
+            stability_report,
+            rov_report,
+            aspa_results,
+            rpki_coverage,
+            has_aspa,
+        )
+        manrs = self.audit_manrs(
+            asn,
+            rpki_coverage,
+            has_aspa,
+            rov_report,
+            contacts,
+            whois_data,
+        )
+        return dora, nis2, manrs
 
     def format_report(self, report: ComplianceAuditReport) -> str:
         lines = [
@@ -893,6 +963,272 @@ class ComplianceAuditor:
         return ComplianceCategoryReport(
             category="Incident Reporting Capability",
             articles=["Art. 23"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    # --- MANRS Checks ---
+
+    def _check_manrs_filtering(
+        self,
+        rpki_coverage: float | None,
+        rov_report: ROVCoverageReport | None,
+    ) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = []
+
+        if rpki_coverage is not None and rov_report is not None:
+            if rpki_coverage >= 0.9 and rov_report.protection_level == "high":
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}, ROV path coverage: {rov_report.path_coverage:.0%}",
+                        recommendation="",
+                        data_source="rov_coverage",
+                    )
+                )
+            elif rpki_coverage >= 0.7 or rov_report.protection_level == "medium":
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}, ROV: {rov_report.protection_level}",
+                        recommendation="Increase ROA coverage to 90%+ and encourage ROV enforcement",
+                        data_source="rov_coverage",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage ({rpki_coverage:.0%}) and ROV ({rov_report.protection_level})",
+                        recommendation="Deploy RPKI ROAs and encourage upstream ROV filtering",
+                        data_source="rov_coverage",
+                    )
+                )
+        elif rpki_coverage is not None:
+            if rpki_coverage >= 0.7:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%} (ROV data unavailable)",
+                        recommendation="Increase ROA coverage and verify ROV enforcement",
+                        data_source="rpki_validation",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="Deploy RPKI ROAs for all announced prefixes",
+                        data_source="rpki_validation",
+                    )
+                )
+        else:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 1",
+                    requirement="Prefix filtering via ROV enforcement",
+                    status=ComplianceLevel.NOT_ASSESSED,
+                    severity=Severity.HIGH,
+                    evidence="No RPKI or ROV data available",
+                    recommendation="Run RPKI validation to assess filtering readiness",
+                    data_source="rpki_validation",
+                )
+            )
+
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 1: Filtering",
+            articles=["Prevent propagation of incorrect routing information"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    def _check_manrs_anti_spoofing(self) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = [
+            ComplianceFinding(
+                article="Action 2",
+                requirement="Source address validation (BCP38/uRPF)",
+                status=ComplianceLevel.NOT_ASSESSED,
+                severity=Severity.MEDIUM,
+                evidence="Anti-spoofing cannot be verified externally",
+                recommendation="Self-verify BCP38/uRPF on customer-facing interfaces; test via CAIDA Spoofer",
+                data_source="none",
+            )
+        ]
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 2: Anti-Spoofing",
+            articles=["Prevent traffic with spoofed source IP addresses"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    def _check_manrs_coordination(
+        self,
+        contacts: dict | None,
+        whois_data: dict | None,
+    ) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = []
+
+        has_peeringdb = _has_contacts(contacts)
+        has_whois = _has_contacts(whois_data)
+
+        if has_peeringdb and has_whois:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 3",
+                    requirement="Maintain up-to-date contact information",
+                    status=ComplianceLevel.COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence="Contacts found in both PeeringDB and WHOIS",
+                    recommendation="",
+                    data_source="peeringdb,whois",
+                )
+            )
+        elif has_peeringdb or has_whois:
+            source = "PeeringDB" if has_peeringdb else "WHOIS"
+            missing = "WHOIS" if has_peeringdb else "PeeringDB"
+            findings.append(
+                ComplianceFinding(
+                    article="Action 3",
+                    requirement="Maintain up-to-date contact information",
+                    status=ComplianceLevel.PARTIAL,
+                    severity=Severity.MEDIUM,
+                    evidence=f"Contacts found in {source} but not {missing}",
+                    recommendation=f"Register contact information in {missing}",
+                    data_source=source.lower(),
+                )
+            )
+        else:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 3",
+                    requirement="Maintain up-to-date contact information",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence="No contact information found in PeeringDB or WHOIS",
+                    recommendation="Register NOC/abuse contacts in PeeringDB and WHOIS/RIR database",
+                    data_source="peeringdb,whois",
+                )
+            )
+
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 3: Coordination",
+            articles=["Facilitate global operational communication"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    def _check_manrs_validation(
+        self,
+        rpki_coverage: float | None,
+        has_aspa: bool | None,
+    ) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = []
+
+        # ROA deployment
+        if rpki_coverage is not None:
+            if rpki_coverage >= 0.9:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="RPKI ROA deployment",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="",
+                        data_source="rpki_validation",
+                    )
+                )
+            elif rpki_coverage >= 0.7:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="RPKI ROA deployment",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="Increase ROA coverage to 90%+",
+                        data_source="rpki_validation",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="RPKI ROA deployment",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="Create RPKI ROAs for all announced prefixes",
+                        data_source="rpki_validation",
+                    )
+                )
+        else:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 4",
+                    requirement="RPKI ROA deployment",
+                    status=ComplianceLevel.NOT_ASSESSED,
+                    severity=Severity.HIGH,
+                    evidence="No RPKI data available",
+                    recommendation="Run RPKI validation to assess ROA deployment",
+                    data_source="rpki_validation",
+                )
+            )
+
+        # ASPA deployment
+        if has_aspa is not None:
+            if has_aspa:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="ASPA deployment for path authorization",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence="ASPA object published",
+                        recommendation="",
+                        data_source="rpki_aspa",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="ASPA deployment for path authorization",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.MEDIUM,
+                        evidence="No ASPA object published",
+                        recommendation="Publish ASPA object at your RIR portal",
+                        data_source="rpki_aspa",
+                    )
+                )
+
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 4: Global Validation",
+            articles=["Facilitate validation of routing information on a global scale"],
             findings=findings,
             score=score,
             level=self._score_to_level(score * 100),
