@@ -1298,3 +1298,80 @@ class TestVerifyAspaPath:
 
         assert "ASPA" in result
         assert "paths checked" in result.lower() or "path" in result.lower()
+
+
+class TestCheckManrs:
+    """Tests for check_manrs tool in standalone mode."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        mock = AsyncMock()
+        mock.get_announced_prefixes = AsyncMock(return_value=["8.8.8.0/24"])
+        mock.get_rpki_validation = AsyncMock(return_value="valid")
+        mock.get_bgp_state = AsyncMock(return_value=[])
+        return mock
+
+    @pytest.fixture
+    def tools(self, mock_ripe_stat):
+        peeringdb = AsyncMock()
+        peeringdb.get_network_by_asn = MagicMock(return_value=None)
+        return BGPTools(
+            ripe_stat=mock_ripe_stat,
+            bgp_radar=AsyncMock(),
+            peeringdb=peeringdb,
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_manrs_returns_assessment(self, tools):
+        """check_manrs should return MANRS readiness assessment."""
+        result = await tools.check_manrs(15169)
+        assert "MANRS" in result
+        assert "Action 1" in result or "Filtering" in result
+
+    @pytest.mark.asyncio
+    async def test_check_manrs_excludes_action2(self, tools):
+        """Action 2 (Anti-Spoofing) should not be scored."""
+        result = await tools.check_manrs(15169)
+        # Should not have Action 2 as a scored section
+        assert "100/100" not in result or "Anti-Spoofing" not in result
+
+
+class TestRunComplianceAudit:
+    """Tests for run_compliance_audit tool in standalone mode."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        mock = AsyncMock()
+        mock.get_announced_prefixes = AsyncMock(return_value=["8.8.8.0/24"])
+        mock.get_rpki_validation = AsyncMock(return_value="valid")
+        mock.get_bgp_state = AsyncMock(return_value=[])
+        mock.get_bgp_update_activity = AsyncMock(return_value={"updates": []})
+        return mock
+
+    @pytest.fixture
+    def tools(self, mock_ripe_stat):
+        monocle = AsyncMock()
+        monocle.get_as_upstreams = AsyncMock(return_value=[])
+        monocle.get_as_peers = AsyncMock(return_value=[])
+        monocle.get_as_downstreams = AsyncMock(return_value=[])
+        peeringdb = AsyncMock()
+        peeringdb.get_ixps_for_asn = MagicMock(return_value=[])
+        peeringdb.get_network_by_asn = MagicMock(return_value=None)
+        return BGPTools(
+            ripe_stat=mock_ripe_stat,
+            bgp_radar=AsyncMock(),
+            monocle=monocle,
+            peeringdb=peeringdb,
+        )
+
+    @pytest.mark.asyncio
+    async def test_manrs_framework(self, tools):
+        """run_compliance_audit with framework='manrs' should work."""
+        result = await tools.run_compliance_audit(15169, framework="manrs")
+        assert "MANRS" in result
+
+    @pytest.mark.asyncio
+    async def test_invalid_framework(self, tools):
+        """Invalid framework should return error."""
+        result = await tools.run_compliance_audit(15169, framework="bogus")
+        assert "invalid" in result.lower() or "Invalid" in result or "Error" in result

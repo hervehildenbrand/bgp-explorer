@@ -10,6 +10,8 @@ from typing import Any
 
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
 from bgp_explorer.analysis.aspa_validation import create_aspa_validator
+from bgp_explorer.analysis.compliance import ComplianceAuditor
+from bgp_explorer.analysis.manrs_conformance import MANRSReadinessAssessor
 from bgp_explorer.analysis.path_analysis import PathAnalyzer
 from bgp_explorer.analysis.resilience import ResilienceAssessor, ResilienceReport
 from bgp_explorer.analysis.rov_coverage import ROVCoverageAnalyzer
@@ -55,6 +57,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "get_prefix_stability": "Analyzing stability for {prefix}...",
     "get_bgp_update_activity": "Getting update activity for {resource}...",
     "analyze_rov_coverage": "Analyzing ROV coverage for {prefix}...",
+    "check_manrs": "Assessing MANRS readiness for AS{asn}...",
+    "run_compliance_audit": "Running {framework} compliance audit for AS{asn}...",
 }
 
 
@@ -116,6 +120,8 @@ class BGPTools:
         )  # rpki_console wired via MCP path
         self._stability_analyzer = StabilityAnalyzer()
         self._rov_coverage_analyzer = ROVCoverageAnalyzer()
+        self._compliance_auditor = ComplianceAuditor()
+        self._manrs_assessor = MANRSReadinessAssessor()
 
     def get_all_tools(self) -> list[Callable[..., Any]]:
         """Get all tool functions for registration with AI backend.
@@ -183,6 +189,10 @@ class BGPTools:
         # Add resilience assessment tool if both monocle and peeringdb available
         if self._monocle and self._peeringdb:
             tools.append(self.assess_network_resilience)
+        # MANRS and compliance tools (always available — MANRS uses RIPE Stat + PeeringDB)
+        tools.append(self.check_manrs)
+        if self._monocle and self._peeringdb:
+            tools.append(self.run_compliance_audit)
         return tools
 
     async def search_asn(self, query: str) -> str:
@@ -2626,3 +2636,245 @@ class BGPTools:
 
         except Exception as e:
             return f"Error analyzing ROV coverage for {prefix}: {str(e)}"
+
+    async def check_manrs(self, asn: int) -> str:
+        """Assess MANRS (Mutually Agreed Norms for Routing Security) readiness.
+
+        Evaluates 3 of the 4 MANRS Actions using locally available data:
+        - Action 1 (Filtering): Indirect proxy via ROA/ROV coverage
+        - Action 2 (Anti-Spoofing): Excluded — cannot be verified externally
+        - Action 3 (Coordination): Contact info in PeeringDB/WHOIS
+        - Action 4 (Validation): RPKI ROA/ASPA deployment
+
+        Does NOT require MANRS API key — uses existing data sources.
+        """
+        try:
+            # Gather RPKI coverage
+            rpki_coverage = None
+            prefixes = []
+            try:
+                prefixes = await self._ripe_stat.get_announced_prefixes(asn)
+                if prefixes:
+                    valid_count = 0
+                    checked = 0
+                    for prefix in prefixes[:20]:
+                        try:
+                            status = await self._ripe_stat.get_rpki_validation(prefix, asn)
+                            checked += 1
+                            if status == "valid":
+                                valid_count += 1
+                        except Exception:
+                            pass
+                    if checked > 0:
+                        rpki_coverage = valid_count / checked
+            except Exception:
+                pass
+
+            # Gather ROV coverage
+            rov_report = None
+            try:
+                if prefixes:
+                    routes = await self._ripe_stat.get_bgp_state(prefixes[0])
+                    if routes:
+                        rov_report = self._rov_coverage_analyzer.analyze_prefix_coverage(
+                            prefixes[0], routes
+                        )
+            except Exception:
+                pass
+
+            # Gather contacts
+            contacts = None
+            if self._peeringdb is not None:
+                try:
+                    net = self._peeringdb.get_network_by_asn(asn)
+                    if net:
+                        contacts = net
+                except Exception:
+                    pass
+
+            report = self._manrs_assessor.assess(
+                asn=asn,
+                rpki_coverage=rpki_coverage,
+                rov_report=rov_report,
+                contacts=contacts,
+            )
+            return self._manrs_assessor.format_report(report)
+
+        except Exception as e:
+            return f"Error assessing MANRS readiness for AS{asn}: {e}"
+
+    async def run_compliance_audit(
+        self,
+        asn: int,
+        framework: str = "both",
+        output_format: str = "text",
+    ) -> str:
+        """Run a DORA, NIS 2, or MANRS compliance audit on a network's BGP routing.
+
+        Frameworks:
+        - 'dora': DORA ICT risk management for financial entities
+        - 'nis2': NIS 2 cybersecurity for critical infrastructure
+        - 'manrs': MANRS routing security (4 Actions)
+        - 'both': DORA + NIS 2 (default)
+        - 'all': DORA + NIS 2 + MANRS
+
+        Scoring: 0-100, where >=80 is COMPLIANT, >=50 is PARTIAL, <50 is NON_COMPLIANT.
+        """
+        fw = framework.lower()
+        valid_frameworks = {"dora", "nis2", "manrs", "both", "all"}
+        if fw not in valid_frameworks:
+            return (
+                f"Invalid framework: '{fw}'. "
+                f"Valid options: dora, nis2, manrs, both, all."
+            )
+
+        try:
+            # MANRS doesn't require monocle
+            if fw == "manrs":
+                return await self.check_manrs(asn)
+
+            if self._monocle is None:
+                return "Monocle not available. Install with: cargo install monocle"
+            if self._peeringdb is None:
+                return "PeeringDB not available."
+
+            # Gather resilience data
+            assessor = self._resilience_assessor
+            upstreams = await self._monocle.get_as_upstreams(asn)
+            peers = await self._monocle.get_as_peers(asn)
+            downstreams = await self._monocle.get_as_downstreams(asn)
+            ixps = self._peeringdb.get_ixps_for_asn(asn)
+
+            peering_score, peer_count = assessor._score_peering(peers)
+            transit_score, transit_issues = assessor._score_transit(
+                upstreams, peer_count=peer_count, downstream_count=len(downstreams)
+            )
+            ixp_score, ixp_names = assessor._score_ixp(ixps)
+
+            scores = {
+                "transit": transit_score,
+                "peering": peering_score,
+                "ixp": ixp_score,
+                "path_redundancy": transit_score,
+            }
+            flags = {
+                "single_transit": len(upstreams) == 1,
+                "ddos_provider": assessor._detect_ddos_provider(upstreams),
+            }
+            final_score = assessor._calculate_final_score(scores, flags)
+
+            upstream_names = []
+            for u in upstreams[:10]:
+                name = f"AS{u.asn2}"
+                if u.asn2_name:
+                    name += f" ({u.asn2_name})"
+                upstream_names.append(name)
+
+            resilience_report = ResilienceReport(
+                asn=asn,
+                score=final_score,
+                transit_score=transit_score,
+                peering_score=peering_score,
+                ixp_score=ixp_score,
+                path_redundancy_score=transit_score,
+                upstream_count=len(upstreams),
+                peer_count=peer_count,
+                ixp_count=len(ixps),
+                upstreams=upstream_names,
+                ixps=ixp_names,
+                issues=transit_issues,
+                recommendations=[],
+                single_transit=len(upstreams) == 1,
+                ddos_provider_detected=assessor._detect_ddos_provider(upstreams),
+            )
+
+            # Gather optional data
+            prefixes = []
+            try:
+                prefixes = await self._ripe_stat.get_announced_prefixes(asn)
+            except Exception:
+                pass
+
+            stability_report = None
+            try:
+                if prefixes:
+                    now = datetime.now(UTC)
+                    start = now - timedelta(days=7)
+                    activity_data = await self._ripe_stat.get_bgp_update_activity(
+                        prefixes[0], start, now
+                    )
+                    stability_report = self._stability_analyzer.analyze_update_activity(
+                        prefixes[0], activity_data
+                    )
+            except Exception:
+                pass
+
+            rpki_coverage = None
+            try:
+                if prefixes:
+                    valid_count = 0
+                    checked = 0
+                    for prefix in prefixes[:20]:
+                        try:
+                            status = await self._ripe_stat.get_rpki_validation(prefix, asn)
+                            checked += 1
+                            if status == "valid":
+                                valid_count += 1
+                        except Exception:
+                            pass
+                    if checked > 0:
+                        rpki_coverage = valid_count / checked
+            except Exception:
+                pass
+
+            rov_report = None
+            try:
+                if prefixes:
+                    routes = await self._ripe_stat.get_bgp_state(prefixes[0])
+                    if routes:
+                        rov_report = self._rov_coverage_analyzer.analyze_prefix_coverage(
+                            prefixes[0], routes
+                        )
+            except Exception:
+                pass
+
+            auditor = self._compliance_auditor
+
+            if fw == "dora":
+                report = auditor.audit_dora(
+                    asn, resilience_report, stability_report, rov_report,
+                    rpki_coverage=rpki_coverage,
+                )
+                return auditor.format_report(report)
+            elif fw == "nis2":
+                report = auditor.audit_nis2(
+                    asn, resilience_report, stability_report, rov_report,
+                    rpki_coverage=rpki_coverage,
+                )
+                return auditor.format_report(report)
+            elif fw == "all":
+                dora_report, nis2_report = auditor.audit_both(
+                    asn, resilience_report, stability_report, rov_report,
+                    rpki_coverage=rpki_coverage,
+                )
+                manrs_result = await self.check_manrs(asn)
+                return (
+                    auditor.format_report(dora_report)
+                    + "\n\n---\n\n"
+                    + auditor.format_report(nis2_report)
+                    + "\n\n---\n\n"
+                    + manrs_result
+                )
+            else:  # "both" = DORA + NIS2
+                dora_report, nis2_report = auditor.audit_both(
+                    asn, resilience_report, stability_report, rov_report,
+                    rpki_coverage=rpki_coverage,
+                )
+                return (
+                    auditor.format_report(dora_report)
+                    + "\n\n---\n\n"
+                    + auditor.format_report(nis2_report)
+                )
+
+        except Exception as e:
+            return f"Error running compliance audit for AS{asn}: {e}"
