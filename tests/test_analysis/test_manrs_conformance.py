@@ -42,7 +42,13 @@ class TestAction1Filtering:
         report = assessor.assess(asn=64496, rpki_coverage=0.95, rov_report=rov)
         filtering = next(f for f in report.action_findings if f.action == MANRSAction.FILTERING)
         assert filtering.readiness == MANRSReadiness.READY
-        assert filtering.measurable is True
+
+    def test_marked_partially_measurable(self, assessor):
+        """Action 1 should be marked as partially measurable (not fully)."""
+        rov = make_rov_report(protection_level="high", path_coverage=0.92)
+        report = assessor.assess(asn=64496, rpki_coverage=0.95, rov_report=rov)
+        filtering = next(f for f in report.action_findings if f.action == MANRSAction.FILTERING)
+        assert filtering.measurable is False
 
     def test_aspiring_medium_coverage(self, assessor):
         """Medium ROA coverage = ASPIRING for filtering."""
@@ -63,6 +69,23 @@ class TestAction1Filtering:
         report = assessor.assess(asn=64496)
         filtering = next(f for f in report.action_findings if f.action == MANRSAction.FILTERING)
         assert filtering.readiness == MANRSReadiness.UNKNOWN
+
+    def test_always_includes_operator_verification(self, assessor):
+        """Even READY should include operator-side verification steps."""
+        rov = make_rov_report(protection_level="high", path_coverage=0.92)
+        report = assessor.assess(asn=64496, rpki_coverage=0.95, rov_report=rov)
+        filtering = next(f for f in report.action_findings if f.action == MANRSAction.FILTERING)
+        all_text = " ".join(filtering.recommendations + filtering.evidence)
+        # Should mention what we CAN'T verify and what the operator must do
+        assert "cannot" in all_text.lower() or "verify" in all_text.lower()
+
+    def test_evidence_distinguishes_proxy_from_actual(self, assessor):
+        """Evidence should make clear this is a proxy measurement."""
+        rov = make_rov_report(protection_level="high", path_coverage=0.92)
+        report = assessor.assess(asn=64496, rpki_coverage=0.95, rov_report=rov)
+        filtering = next(f for f in report.action_findings if f.action == MANRSAction.FILTERING)
+        all_text = " ".join(filtering.evidence)
+        assert "proxy" in all_text.lower() or "indirect" in all_text.lower()
 
 
 # --- Action 2: Anti-Spoofing Tests ---

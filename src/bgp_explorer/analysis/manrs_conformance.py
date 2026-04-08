@@ -80,17 +80,33 @@ class MANRSReadinessAssessor:
         rpki_coverage: float | None,
         rov_report: ROVCoverageReport | None,
     ) -> MANRSActionFinding:
-        """Action 1: Filtering — proxy via ROV coverage."""
+        """Action 1: Filtering — partially assessable via indirect proxy.
+
+        MANRS Action 1 asks: "Do you prevent propagation of incorrect routing
+        information?" — meaning ingress prefix filtering on customer/peer sessions.
+
+        We CANNOT verify this externally. What we CAN measure is an indirect proxy:
+        - Whether your prefixes have ROAs (prerequisite for others to filter you)
+        - Whether ROV enforcers exist in paths to your prefixes
+
+        The operator must verify their own ingress filtering configuration.
+        """
         evidence: list[str] = []
         recommendations: list[str] = []
         data_sources: list[str] = []
 
+        # Always add the caveat — this is a proxy, not direct measurement
+        evidence.append(
+            "Indirect proxy only — we cannot verify your ingress filters externally"
+        )
+
         if rpki_coverage is not None:
-            evidence.append(f"ROA coverage: {rpki_coverage:.0%}")
+            evidence.append(f"ROA coverage (proxy): {rpki_coverage:.0%}")
             data_sources.append("rpki_validation")
         if rov_report is not None:
             evidence.append(
-                f"ROV path coverage: {rov_report.path_coverage:.0%} ({rov_report.protection_level})"
+                f"ROV path coverage (proxy): {rov_report.path_coverage:.0%} "
+                f"({rov_report.protection_level})"
             )
             data_sources.append("rov_coverage")
 
@@ -115,11 +131,25 @@ class MANRSReadinessAssessor:
             recommendations.append("Deploy RPKI ROAs for all announced prefixes")
             recommendations.append("Encourage upstreams to enforce ROV filtering")
 
+        # Always add operator-side verification steps
+        recommendations.append(
+            "Verify on your routers: enable ROV (RPKI-to-Router) on all "
+            "eBGP sessions and reject RPKI-invalid routes"
+        )
+        recommendations.append(
+            "Verify on your routers: apply prefix filters on customer sessions "
+            "using IRR/RPSL data (e.g., bgpq4/bgpq3 from RADB/RIPE)"
+        )
+        recommendations.append(
+            "Verify on your routers: apply max-prefix limits on all eBGP peers"
+        )
+
         return MANRSActionFinding(
             action=MANRSAction.FILTERING,
             readiness=readiness,
             evidence=evidence,
-            measurable=True,
+            # Marked as NOT fully measurable — we only see indirect proxies
+            measurable=False,
             recommendations=recommendations,
             data_sources_used=data_sources,
         )
@@ -254,10 +284,11 @@ class MANRSReadinessAssessor:
         )
 
         limitations = [
+            "Action 1 (Filtering) assessed via indirect proxy (ROA/ROV coverage) — "
+            "cannot verify your actual ingress filters. Operator must verify "
+            "ROV rejection and prefix filtering on their routers",
             "Action 2 (Anti-Spoofing) excluded from scoring — cannot be verified "
             "externally. Self-test with CAIDA Spoofer (spoofer.caida.org)",
-            "Filtering (Action 1) assessed via ROV coverage proxy, "
-            "not direct ingress filter verification",
         ]
 
         return MANRSReadinessReport(
