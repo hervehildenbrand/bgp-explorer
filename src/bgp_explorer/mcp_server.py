@@ -4082,6 +4082,773 @@ async def investigate_asn(
         return f"Error investigating AS{asn}: {e}"
 
 
+@mcp.tool()
+async def investigate_prefix(
+    prefix: Annotated[
+        str, Field(description="IP prefix in CIDR notation (e.g., '8.8.8.0/24')")
+    ],
+    sections: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Sections: summary, routing, anomalies, paths, collectors, looking_glass. "
+                "Default: summary only."
+            ),
+            default=None,
+        ),
+    ] = None,
+    vantage_point: Annotated[
+        str | None,
+        Field(description="RRC collector for looking_glass section (e.g., 'rrc00')"),
+    ] = None,
+) -> str:
+    """Investigate a prefix — the primary tool for prefix queries.
+
+    Returns a summary by default (origin ASN, visibility, RPKI status, anomaly flags).
+    Use sections to expand:
+    - summary: Origin ASN, visibility, RPKI status, anomaly flags
+    - routing: Current BGP state with sample AS paths
+    - anomalies: MOAS, RPKI, visibility, recent origin changes
+    - paths: Path diversity, upstream/transit ASNs, prepending
+    - collectors: Per-collector path comparison
+    - looking_glass: Vantage-point view (requires vantage_point param)
+
+    Replaces: lookup_prefix, analyze_as_path, compare_collectors,
+    check_prefix_anomalies, query_looking_glass.
+    """
+    if "/" not in prefix:
+        return (
+            f"Invalid prefix format: '{prefix}'. "
+            f"Please use CIDR notation (e.g., '8.8.8.0/24' or '2001:db8::/32')."
+        )
+
+    VALID = {"summary", "routing", "anomalies", "paths", "collectors", "looking_glass"}
+    requested = parse_sections(sections, VALID, ["summary"])
+    if isinstance(requested, str):
+        return requested
+
+    try:
+        client = await get_ripe_stat()
+        _routes: list | None = None
+
+        async def _get_routes():
+            nonlocal _routes
+            if _routes is None:
+                _routes = await client.get_bgp_state(prefix)
+            return _routes
+
+        is_ipv6 = ":" in prefix
+        family_str = "IPv6" if is_ipv6 else "IPv4"
+
+        async def summary_section() -> list[str]:
+            routes = await _get_routes()
+            if not routes:
+                return [f"No routes found for {family_str} prefix {prefix}.", ""]
+
+            origin_asns = sorted(set(r.origin_asn for r in routes))
+            collectors = set(r.collector for r in routes)
+
+            lines = [
+                f"**Prefix: {prefix}** ({family_str})",
+                "",
+                f"**Origin ASN(s):** {', '.join(f'AS{a}' for a in origin_asns)}",
+                f"**Visibility:** {len(collectors)} collectors",
+            ]
+
+            # Quick RPKI check for primary origin
+            try:
+                rpki = await client.get_rpki_validation(prefix, origin_asns[0])
+                lines.append(f"**RPKI Status:** {rpki.upper()}")
+            except Exception:
+                pass
+
+            # Anomaly flags
+            flags = []
+            if len(origin_asns) > 1:
+                flags.append(f"MOAS ({len(origin_asns)} origins)")
+            if len(collectors) < 5:
+                flags.append("Low visibility")
+            if flags:
+                lines.append(f"**Flags:** {', '.join(flags)}")
+
+            lines.append("")
+            return lines
+
+        async def routing_section() -> list[str]:
+            routes = await _get_routes()
+            if not routes:
+                return [f"No routes found for {prefix}.", ""]
+
+            unique_paths = set(tuple(r.as_path) for r in routes)
+            lines = [
+                f"**Routing State: {prefix}**",
+                f"**Unique AS paths:** {len(unique_paths)}",
+                "",
+                "**Sample paths:**",
+            ]
+            for i, path in enumerate(list(unique_paths)[:5]):
+                path_str = " -> ".join(f"AS{asn}" for asn in path)
+                lines.append(f"  {i + 1}. {path_str}")
+            lines.append("")
+            return lines
+
+        async def anomalies_section() -> list[str]:
+            routes = await _get_routes()
+            if not routes:
+                return [f"No routes found for {prefix}.", ""]
+
+            origin_asns = list(set(r.origin_asn for r in routes))
+            collectors = list(set(r.collector for r in routes))
+            risk_factors: list[str] = []
+
+            lines = [f"**Anomaly Check: {prefix}**", ""]
+
+            # MOAS
+            if len(origin_asns) > 1:
+                risk_factors.append(f"MOAS: {len(origin_asns)} origins ({', '.join(f'AS{a}' for a in origin_asns)})")
+            else:
+                lines.append(f"**Single Origin:** AS{origin_asns[0]}")
+
+            # Visibility
+            if len(collectors) < 5:
+                risk_factors.append(f"Low visibility: {len(collectors)} collectors")
+
+            # RPKI
+            lines.append("")
+            lines.append("**RPKI Validation:**")
+            for origin in origin_asns:
+                try:
+                    status = await client.get_rpki_validation(prefix, origin)
+                    lines.append(f"  - AS{origin}: {status.upper()}")
+                    if status == "invalid":
+                        risk_factors.append(f"RPKI Invalid: AS{origin}")
+                except Exception:
+                    lines.append(f"  - AS{origin}: error")
+
+            # Origin history
+            now = datetime.now(UTC)
+            week_ago = now - timedelta(days=7)
+            try:
+                history = await client.get_routing_history(prefix, week_ago, now)
+                historical: set[int] = set()
+                for od in history.get("by_origin", []):
+                    try:
+                        historical.add(int(od.get("origin", "")))
+                    except ValueError:
+                        pass
+                new_origins = set(origin_asns) - historical
+                if new_origins:
+                    risk_factors.append(f"New origin(s) in 7d: {', '.join(f'AS{o}' for o in new_origins)}")
+            except Exception:
+                pass
+
+            lines.append("")
+            if risk_factors:
+                lines.append("**Risk Factors:**")
+                for f in risk_factors:
+                    lines.append(f"  - {f}")
+            else:
+                lines.append("**No risk factors detected.**")
+            lines.append("")
+            return lines
+
+        async def paths_section() -> list[str]:
+            routes = await _get_routes()
+            if not routes:
+                return [f"No routes found for {prefix}.", ""]
+
+            analyzer = get_path_analyzer()
+            diversity = analyzer.get_path_diversity(routes)
+            upstreams = analyzer.get_upstream_asns(routes)
+            transits = analyzer.get_transit_asns(routes)
+            prepending = analyzer.get_path_prepending(routes)
+
+            lines = [
+                f"**Path Analysis: {prefix}**",
+                "",
+                f"**Unique paths:** {diversity['unique_paths']}",
+                f"**Path length:** {diversity['min_path_length']}-{diversity['max_path_length']} "
+                f"(avg {diversity['avg_path_length']:.1f})",
+                f"**Upstream ASNs:** {len(upstreams)}",
+            ]
+            if upstreams:
+                lines.append(f"  {', '.join(f'AS{a}' for a in sorted(upstreams)[:10])}")
+            lines.append(f"**Transit ASNs:** {len(transits)}")
+            if transits:
+                lines.append(f"  {', '.join(f'AS{a}' for a in sorted(transits)[:10])}")
+
+            if prepending:
+                lines.append(f"**Prepending:** {len(prepending)} routes")
+                for p in prepending[:3]:
+                    lines.append(f"  - AS{p['asn']} x{p['prepend_count']}")
+            lines.append("")
+            return lines
+
+        async def collectors_section() -> list[str]:
+            routes = await _get_routes()
+            if not routes:
+                return [f"No routes found for {prefix}.", ""]
+
+            analyzer = get_path_analyzer()
+            comparison = analyzer.compare_paths_across_collectors(routes)
+
+            lines = [
+                f"**Collector Comparison: {prefix}**",
+                f"**Collectors:** {comparison['collector_count']}",
+                f"**Consistent origin:** {'Yes' if comparison['paths_consistent'] else 'No'}",
+                "",
+            ]
+            by_collector = comparison.get("by_collector", {})
+            for coll, data in sorted(by_collector.items())[:10]:
+                path_str = " -> ".join(f"AS{a}" for a in data["path"])
+                lines.append(f"  **{coll}:** {path_str}")
+            if len(by_collector) > 10:
+                lines.append(f"  ... and {len(by_collector) - 10} more")
+            lines.append("")
+            return lines
+
+        async def looking_glass_section() -> list[str]:
+            data = await client.get_looking_glass(prefix, collector=vantage_point)
+            rrcs = data.get("rrcs", [])
+            if not rrcs:
+                return [f"No looking glass data for {prefix}.", ""]
+
+            lines = [f"**Looking Glass: {prefix}**", ""]
+            for rrc in rrcs:
+                rrc_name = rrc.get("rrc", "unknown")
+                location = rrc.get("location", "")
+                peers = rrc.get("peers", [])
+                header = f"**{rrc_name}**"
+                if location:
+                    header += f" ({location})"
+                header += f" — {len(peers)} peers"
+                lines.append(header)
+                for peer in peers[:5]:
+                    peer_asn = peer.get("asn_origin", peer.get("asn", ""))
+                    as_path = peer.get("as_path", "")
+                    lines.append(f"  - AS{peer_asn} | {as_path}")
+                if len(peers) > 5:
+                    lines.append(f"  ... and {len(peers) - 5} more")
+                lines.append("")
+            return lines
+
+        return await build_response(
+            requested,
+            {
+                "summary": summary_section,
+                "routing": routing_section,
+                "anomalies": anomalies_section,
+                "paths": paths_section,
+                "collectors": collectors_section,
+                "looking_glass": looking_glass_section,
+            },
+        )
+
+    except Exception as e:
+        return f"Error investigating prefix {prefix}: {e}"
+
+
+@mcp.tool()
+async def check_rpki(
+    target: Annotated[
+        int | str,
+        Field(
+            description=(
+                "ASN (integer) for network RPKI analysis, or AS path string "
+                "(e.g., '3356 174 15169') for path validation"
+            )
+        ),
+    ],
+    sections: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "For ASN mode: summary, roa_coverage, roa_guidance, "
+                "aspa_status, aspa_guidance, rov_coverage. Default: summary."
+            ),
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """Check RPKI/ROA/ASPA status — the primary tool for RPKI queries.
+
+    Accepts an ASN (int) for network analysis, or an AS path string for
+    path validation. Mode is auto-detected from the target type.
+
+    ASN mode sections:
+    - summary: ROA coverage %, ASPA published?, key issues
+    - roa_coverage: Per-prefix RPKI validation status
+    - roa_guidance: Missing ROAs, maxLength issues
+    - aspa_status: ASPA object details
+    - aspa_guidance: Published vs inferred upstreams
+    - rov_coverage: ROV enforcer path coverage
+
+    Path mode: validates AS path against ASPA objects (no sections).
+
+    Replaces: get_rpki_status, check_rpki_for_asn, get_roa_guidance,
+    get_aspa_status, get_aspa_guidance, verify_aspa_path,
+    analyze_rov_coverage, validate_prefix_routes.
+    """
+    import asyncio
+
+    # Auto-detect mode
+    is_path_mode = isinstance(target, str)
+
+    # PATH MODE
+    if is_path_mode:
+        validator = await get_aspa_validator()
+        if validator is None:
+            return (
+                "ASPA validation requires Monocle for AS relationship data. "
+                "Install with: cargo install monocle"
+            )
+        try:
+            asns = [int(x.strip()) for x in str(target).replace(",", " ").split() if x.strip()]
+            if not asns:
+                return "Please provide a valid AS path (e.g., '3356 174 15169')."
+
+            result = await validator.validate_path(asns)
+            path_str = " -> ".join(f"AS{a}" for a in result.as_path)
+            state_label = result.state.value.upper()
+
+            lines = [
+                f"**ASPA Path Verification: {path_str}**",
+                "",
+                f"**State:** {state_label}",
+                f"**Valley-free:** {'Yes' if result.valley_free else 'No (possible route leak)'}",
+                "",
+            ]
+            if result.hop_results:
+                lines.append("**Per-hop analysis:**")
+                for hop in result.hop_results:
+                    auth = {True: "authorized", False: "not authorized", None: "unknown"}[
+                        hop.is_authorized_provider
+                    ]
+                    lines.append(
+                        f"  - AS{hop.asn} -> AS{hop.next_asn}: {auth} ({hop.relationship_type})"
+                    )
+                lines.append("")
+            if result.issues:
+                lines.append("**Issues:**")
+                for issue in result.issues:
+                    lines.append(f"  - {issue}")
+            else:
+                lines.append("**No issues detected.**")
+            return "\n".join(lines)
+        except ValueError:
+            return "Invalid AS path format. Use space or comma-separated ASNs (e.g., '3356 174 15169')."
+        except Exception as e:
+            return f"Error verifying ASPA path: {e}"
+
+    # ASN MODE
+    asn = int(target)
+    VALID = {"summary", "roa_coverage", "roa_guidance", "aspa_status", "aspa_guidance", "rov_coverage"}
+    requested = parse_sections(sections, VALID, ["summary"])
+    if isinstance(requested, str):
+        return requested
+
+    try:
+        client = await get_ripe_stat()
+        _prefixes: list[str] | None = None
+
+        async def _get_prefixes():
+            nonlocal _prefixes
+            if _prefixes is None:
+                _prefixes = await client.get_announced_prefixes(asn)
+            return _prefixes
+
+        async def summary_section() -> list[str]:
+            prefixes = await _get_prefixes()
+            if not prefixes:
+                return [f"AS{asn} is not announcing any prefixes.", ""]
+
+            # RPKI coverage
+            valid_count = 0
+            checked = 0
+            semaphore = asyncio.Semaphore(10)
+
+            async def check_one(p: str):
+                nonlocal valid_count, checked
+                async with semaphore:
+                    try:
+                        detail = await client.get_rpki_validation_detail(p, asn)
+                        checked += 1
+                        if detail["status"] == "valid":
+                            valid_count += 1
+                    except Exception:
+                        pass
+
+            await asyncio.gather(*(check_one(p) for p in prefixes[:20]))
+            coverage_pct = (valid_count / checked * 100) if checked else 0
+
+            lines = [
+                f"**AS{asn} RPKI Summary**",
+                "",
+                f"**Prefixes checked:** {checked}/{len(prefixes)}",
+                f"**ROA Coverage:** {coverage_pct:.0f}% ({valid_count} valid)",
+            ]
+
+            # ASPA status
+            try:
+                rpki_console = await get_rpki_console()
+                if rpki_console is not None:
+                    has_aspa = await rpki_console.has_aspa(asn)
+                    lines.append(f"**ASPA Published:** {'Yes' if has_aspa else 'No'}")
+            except Exception:
+                pass
+
+            lines.append("")
+            return lines
+
+        async def roa_coverage_section() -> list[str]:
+            return [await check_rpki_for_asn(asn)]
+
+        async def roa_guidance_section() -> list[str]:
+            return [await get_roa_guidance(asn)]
+
+        async def aspa_status_section() -> list[str]:
+            return [await get_aspa_status(asn)]
+
+        async def aspa_guidance_section() -> list[str]:
+            return [await get_aspa_guidance(asn)]
+
+        async def rov_coverage_section() -> list[str]:
+            prefixes = await _get_prefixes()
+            if not prefixes:
+                return [f"AS{asn} has no prefixes.", ""]
+            return [await analyze_rov_coverage(prefixes[0])]
+
+        return await build_response(
+            requested,
+            {
+                "summary": summary_section,
+                "roa_coverage": roa_coverage_section,
+                "roa_guidance": roa_guidance_section,
+                "aspa_status": aspa_status_section,
+                "aspa_guidance": aspa_guidance_section,
+                "rov_coverage": rov_coverage_section,
+            },
+        )
+
+    except Exception as e:
+        return f"Error checking RPKI for AS{asn}: {e}"
+
+
+@mcp.tool()
+async def get_routing_history_v2(
+    resource: Annotated[
+        str, Field(description="IP prefix (e.g., '8.8.8.0/24') or ASN (e.g., 'AS15169')")
+    ],
+    start_date: Annotated[str, Field(description="Start date (YYYY-MM-DD)")],
+    end_date: Annotated[str, Field(description="End date (YYYY-MM-DD)")],
+    sections: Annotated[
+        list[str] | None,
+        Field(
+            description="Sections: summary, origins, paths, stability, updates. Default: summary.",
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """Get routing history and stability — the primary tool for historical queries.
+
+    Returns a summary by default (origin change count, stability score).
+    Use sections to expand:
+    - summary: Origin count, stability score
+    - origins: Origin ASN changes over time
+    - paths: AS path changes over time (BGPlay)
+    - stability: Detailed stability analysis with flap detection
+    - updates: Raw update activity time series
+
+    Replaces: get_routing_history, get_bgp_path_history,
+    get_prefix_stability, get_bgp_update_activity.
+    """
+    try:
+        start = datetime.fromisoformat(start_date).replace(tzinfo=UTC)
+        end = datetime.fromisoformat(end_date).replace(tzinfo=UTC)
+    except ValueError:
+        return "Invalid date format. Use YYYY-MM-DD."
+
+    if start > end:
+        return f"Invalid date range: start_date ({start_date}) is after end_date ({end_date})."
+
+    VALID = {"summary", "origins", "paths", "stability", "updates"}
+    requested = parse_sections(sections, VALID, ["summary"])
+    if isinstance(requested, str):
+        return requested
+
+    try:
+        client = await get_ripe_stat()
+
+        async def summary_section() -> list[str]:
+            lines = [
+                f"**Routing History: {resource}**",
+                f"**Period:** {start_date} to {end_date}",
+                "",
+            ]
+            history = await client.get_routing_history(resource, start, end)
+            by_origin = history.get("by_origin", [])
+            lines.append(f"**Origins observed:** {len(by_origin)}")
+
+            # Quick stability check
+            try:
+                activity_data = await client.get_bgp_update_activity(resource, start, end)
+                analyzer = get_stability_analyzer()
+                report = analyzer.analyze_update_activity(resource, activity_data)
+                lines.append(f"**Stability score:** {report.stability_score:.1f}/10")
+                if report.is_flapping:
+                    lines.append("**Status:** FLAPPING")
+                elif report.is_stable:
+                    lines.append("**Status:** STABLE")
+            except Exception:
+                pass
+            lines.append("")
+            return lines
+
+        async def origins_section() -> list[str]:
+            return [await get_routing_history(resource, start_date, end_date)]
+
+        async def paths_section() -> list[str]:
+            return [await get_bgp_path_history(resource, start_date, end_date)]
+
+        async def stability_section() -> list[str]:
+            return [await get_prefix_stability(resource, start_date, end_date)]
+
+        async def updates_section() -> list[str]:
+            return [await get_bgp_update_activity(resource, start_date, end_date)]
+
+        return await build_response(
+            requested,
+            {
+                "summary": summary_section,
+                "origins": origins_section,
+                "paths": paths_section,
+                "stability": stability_section,
+                "updates": updates_section,
+            },
+        )
+
+    except Exception as e:
+        return f"Error getting routing history for {resource}: {e}"
+
+
+@mcp.tool()
+async def investigate_ixp(
+    target: Annotated[
+        int | str,
+        Field(
+            description=(
+                "ASN (int) to show IXP presence, or IXP name/ID (string) "
+                "to show IXP details and members"
+            )
+        ),
+    ],
+) -> str:
+    """Investigate IXP presence or details.
+
+    Accepts an ASN (int) to show where it peers, or an IXP name/ID (string)
+    to show IXP details and member networks.
+
+    Replaces: get_ixps_for_asn, get_networks_at_ixp, get_ixp_details.
+    """
+    peeringdb = await get_peeringdb()
+    if peeringdb is None:
+        return "PeeringDB is not configured."
+
+    try:
+        # ASN mode
+        if isinstance(target, int):
+            presences = peeringdb.get_ixps_for_asn(target)
+            if not presences:
+                return f"AS{target} is not present at any IXPs in PeeringDB."
+
+            lines = [
+                f"**AS{target} IXP Presence**",
+                f"**Total IXPs:** {len(presences)}",
+                "",
+            ]
+            for p in presences:
+                speed_str = ""
+                if p.speed:
+                    speed_str = f" ({p.speed // 1000} Gbps)" if p.speed >= 100000 else f" ({p.speed} Mbps)"
+                lines.append(f"**{p.ixp_name}**{speed_str}")
+                if p.ipaddr4:
+                    lines.append(f"  - IPv4: {p.ipaddr4}")
+                if p.ipaddr6:
+                    lines.append(f"  - IPv6: {p.ipaddr6}")
+                lines.append("")
+            return "\n".join(lines)
+
+        # IXP mode (string)
+        try:
+            ixp_id_or_name: int | str = int(target)
+        except ValueError:
+            ixp_id_or_name = target
+
+        ixp_info = peeringdb.get_ixp_details(ixp_id_or_name)
+        if not ixp_info:
+            return f"IXP '{target}' not found in PeeringDB."
+
+        lines = [
+            f"**{ixp_info.name}**",
+            f"**Location:** {ixp_info.city}, {ixp_info.country}",
+        ]
+        if ixp_info.participant_count:
+            lines.append(f"**Participants:** {ixp_info.participant_count}")
+        if ixp_info.website:
+            lines.append(f"**Website:** {ixp_info.website}")
+        lines.append("")
+
+        networks = peeringdb.get_networks_at_ixp(ixp_id_or_name)
+        if networks:
+            lines.append(f"**Member Networks ({len(networks)}):**")
+            for n in networks[:20]:
+                type_str = f" ({n.info_type})" if n.info_type else ""
+                lines.append(f"  - AS{n.asn}: {n.name}{type_str}")
+            if len(networks) > 20:
+                lines.append(f"  ... and {len(networks) - 20} more")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error investigating IXP: {e}"
+
+
+@mcp.tool()
+async def probe_network(
+    target: Annotated[str, Field(description="IP address or hostname to probe")],
+    type: Annotated[
+        str | None,
+        Field(description="'ping' (default) or 'traceroute'"),
+    ] = None,
+    locations: Annotated[
+        list[str] | None,
+        Field(
+            description="Location filters: country codes (US, DE), continent (EU, NA). Default: global.",
+            default=None,
+        ),
+    ] = None,
+) -> str:
+    """Probe network reachability from global vantage points.
+
+    Performs ping (default) or traceroute from distributed probes.
+
+    Replaces: ping_from_global, traceroute_from_global.
+    """
+    bogon_msg = _check_bogon_target(target)
+    if bogon_msg:
+        return bogon_msg
+
+    globalping = await get_globalping()
+    if globalping is None:
+        return "Globalping is not configured."
+
+    probe_type = (type or "ping").lower()
+
+    try:
+        if probe_type == "traceroute":
+            result = await globalping.traceroute(target=target, locations=locations, limit=5)
+            if not result.probes:
+                return f"No traceroute results for {target}."
+
+            lines = [
+                f"**Global Traceroute: {target}**",
+                f"**Probes:** {len(result.probes)}",
+                "",
+            ]
+            for probe_result in result.probes[:5]:
+                location = f"{probe_result.city}, {probe_result.country}"
+                lines.append(f"**From {location}:**")
+                if probe_result.hops:
+                    for i, hop in enumerate(probe_result.hops[:15], 1):
+                        host = hop.get("resolvedHostname") or hop.get("resolvedAddress") or hop.get("host")
+                        timings = hop.get("timings", [])
+                        rtt = timings[0].get("rtt") if timings and isinstance(timings, list) else hop.get("rtt")
+                        if host:
+                            lines.append(f"  {i}. {host}" + (f" ({rtt:.2f}ms)" if rtt else ""))
+                        else:
+                            lines.append(f"  {i}. *")
+                lines.append("")
+            return "\n".join(lines)
+
+        # Default: ping
+        result = await globalping.ping(target=target, locations=locations, limit=10)
+        if not result.probes:
+            return f"No ping results for {target}."
+
+        lines = [
+            f"**Global Ping: {target}**",
+            f"**Probes:** {len(result.probes)}",
+            "",
+        ]
+
+        successful = [r for r in result.probes if r.avg_latency is not None]
+        if successful:
+            latencies = [r.avg_latency for r in successful]
+            lines.append("**Latency Summary:**")
+            lines.append(f"  Min: {min(latencies):.2f}ms | Max: {max(latencies):.2f}ms | Avg: {sum(latencies)/len(latencies):.2f}ms")
+            lines.append("")
+
+        lines.append("**Results:**")
+        for pr in result.probes[:10]:
+            loc = f"{pr.city}, {pr.country}"
+            if pr.avg_latency is not None:
+                status = f"{pr.avg_latency:.2f}ms"
+                if pr.packet_loss and pr.packet_loss > 0:
+                    status += f" ({pr.packet_loss}% loss)"
+                lines.append(f"  - {loc}: {status}")
+            else:
+                lines.append(f"  - {loc}: Failed/Timeout")
+
+        return "\n".join(lines)
+
+    except ValueError as e:
+        error_msg = str(e)
+        if "No probes available" in error_msg:
+            return f"**PROBE AVAILABILITY ERROR**\n\n{error_msg}\n\nTry different locations."
+        return f"Error probing {target}: {error_msg}"
+    except Exception as e:
+        return f"Error probing {target}: {e}"
+
+
+@mcp.tool()
+async def run_audit(
+    asn: Annotated[int, Field(description="Autonomous System Number to audit")],
+    framework: Annotated[
+        str | None,
+        Field(description="'dora', 'nis2', 'manrs', or 'all' (default)"),
+    ] = None,
+    output_format: Annotated[
+        str | None,
+        Field(description="'text' (default) or 'json'"),
+    ] = None,
+) -> str:
+    """Run compliance audits — the primary tool for DORA/NIS2/MANRS.
+
+    Frameworks:
+    - dora: DORA ICT risk management for financial entities
+    - nis2: NIS 2 cybersecurity for critical infrastructure
+    - manrs: MANRS routing security (uses API if key available, else local)
+    - all: All frameworks (default)
+
+    Replaces: run_compliance_audit, check_manrs, get_manrs_info.
+    """
+    fw = (framework or "all").lower()
+    fmt = (output_format or "text").lower()
+
+    valid_frameworks = {"dora", "nis2", "manrs", "all", "both"}
+    if fw not in valid_frameworks:
+        return (
+            f"Invalid framework: '{fw}'. "
+            f"Valid options: dora, nis2, manrs, all."
+        )
+
+    # Delegate to existing run_compliance_audit (which already handles all cases)
+    if fw == "all":
+        fw = "both"
+
+    return await run_compliance_audit(asn, framework=fw, output_format=fmt)
+
+
 # =============================================================================
 # Server Entry Point
 # =============================================================================
