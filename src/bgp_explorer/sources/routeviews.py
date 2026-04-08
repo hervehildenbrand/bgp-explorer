@@ -81,9 +81,7 @@ class RouteViewsClient(DataSource):
         url = f"{self.BASE_URL}{endpoint}"
         async with self._session.get(url) as response:
             if response.status != 200:
-                raise ValueError(
-                    f"RouteViews API error: HTTP {response.status} for {endpoint}"
-                )
+                raise ValueError(f"RouteViews API error: HTTP {response.status} for {endpoint}")
 
             data = await response.json()
 

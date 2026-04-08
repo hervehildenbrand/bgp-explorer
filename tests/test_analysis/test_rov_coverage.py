@@ -257,9 +257,7 @@ class TestAnalyzePrefixCoverage:
         assert len(report.rov_enforcers_in_paths) >= 2  # At least Lumen and NTT
 
         # Find Lumen in the list
-        lumen_entry = next(
-            (e for e in report.rov_enforcers_in_paths if e["asn"] == 3356), None
-        )
+        lumen_entry = next((e for e in report.rov_enforcers_in_paths if e["asn"] == 3356), None)
         assert lumen_entry is not None
         assert lumen_entry["path_count"] == 2  # Appears in 2 routes
 

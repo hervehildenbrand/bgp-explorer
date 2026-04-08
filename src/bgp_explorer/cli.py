@@ -717,9 +717,7 @@ async def run_audit(asn: int, framework: str, output_format: str) -> str:
                 now = datetime.now(UTC)
                 start = now - timedelta(days=7)
                 first_prefix = prefixes[0]
-                activity_data = await ripe.get_bgp_update_activity(
-                    first_prefix, start, now
-                )
+                activity_data = await ripe.get_bgp_update_activity(first_prefix, start, now)
                 stability_report = StabilityAnalyzer().analyze_update_activity(
                     first_prefix, activity_data
                 )
@@ -759,9 +757,7 @@ async def run_audit(asn: int, framework: str, output_format: str) -> str:
                 await ripe.connect()
                 routes = await ripe.get_bgp_state(prefixes[0])
                 if routes:
-                    rov_report = ROVCoverageAnalyzer().analyze_prefix_coverage(
-                        prefixes[0], routes
-                    )
+                    rov_report = ROVCoverageAnalyzer().analyze_prefix_coverage(prefixes[0], routes)
                 await ripe.disconnect()
         except Exception:
             pass
@@ -771,31 +767,43 @@ async def run_audit(asn: int, framework: str, output_format: str) -> str:
 
         if framework == "dora":
             report = auditor.audit_dora(
-                asn, resilience_report, stability_report, rov_report,
+                asn,
+                resilience_report,
+                stability_report,
+                rov_report,
                 rpki_coverage=rpki_coverage,
             )
             if output_format == "json":
                 import json
+
                 return json.dumps(report.to_dict(), indent=2)
             return auditor.format_report(report)
 
         elif framework == "nis2":
             report = auditor.audit_nis2(
-                asn, resilience_report, stability_report, rov_report,
+                asn,
+                resilience_report,
+                stability_report,
+                rov_report,
                 rpki_coverage=rpki_coverage,
             )
             if output_format == "json":
                 import json
+
                 return json.dumps(report.to_dict(), indent=2)
             return auditor.format_report(report)
 
         else:  # "both"
             dora_report, nis2_report = auditor.audit_both(
-                asn, resilience_report, stability_report, rov_report,
+                asn,
+                resilience_report,
+                stability_report,
+                rov_report,
                 rpki_coverage=rpki_coverage,
             )
             if output_format == "json":
                 import json
+
                 return json.dumps(
                     {"dora": dora_report.to_dict(), "nis2": nis2_report.to_dict()},
                     indent=2,

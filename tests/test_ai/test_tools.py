@@ -163,9 +163,7 @@ class TestBGPTools:
             "status": "valid",
             "prefix": "8.8.8.0/24",
             "origin_asn": 15169,
-            "validating_roas": [
-                {"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}
-            ],
+            "validating_roas": [{"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}],
         }
 
         result = await tools.get_rpki_status("8.8.8.0/24", 15169)
@@ -181,9 +179,7 @@ class TestBGPTools:
             "status": "valid",
             "prefix": "192.0.2.0/21",
             "origin_asn": 64496,
-            "validating_roas": [
-                {"origin": "64496", "prefix": "192.0.2.0/21", "max_length": 24}
-            ],
+            "validating_roas": [{"origin": "64496", "prefix": "192.0.2.0/21", "max_length": 24}],
         }
 
         result = await tools.get_rpki_status("192.0.2.0/21", 64496)
@@ -193,9 +189,7 @@ class TestBGPTools:
     @pytest.mark.asyncio
     async def test_check_rpki_for_asn_per_prefix(self, tools, mock_ripe_stat):
         """Test check_rpki_for_asn shows per-prefix breakdown."""
-        mock_ripe_stat.get_announced_prefixes.return_value = [
-            "8.8.8.0/24", "10.0.0.0/8"
-        ]
+        mock_ripe_stat.get_announced_prefixes.return_value = ["8.8.8.0/24", "10.0.0.0/8"]
 
         async def mock_detail(prefix, asn):
             if prefix == "8.8.8.0/24":
@@ -203,7 +197,9 @@ class TestBGPTools:
                     "status": "valid",
                     "prefix": "8.8.8.0/24",
                     "origin_asn": asn,
-                    "validating_roas": [{"origin": str(asn), "prefix": "8.8.8.0/24", "max_length": 24}],
+                    "validating_roas": [
+                        {"origin": str(asn), "prefix": "8.8.8.0/24", "max_length": 24}
+                    ],
                 }
             return {
                 "status": "not-found",
@@ -244,9 +240,7 @@ class TestBGPTools:
     async def test_get_whois_data_prefix_with_irr(self, tools, mock_ripe_stat):
         """Test WHOIS data for prefix with IRR records."""
         mock_ripe_stat.get_whois_data.return_value = {
-            "records": [
-                [{"key": "inetnum", "value": "193.0.0.0 - 193.0.7.255"}]
-            ],
+            "records": [[{"key": "inetnum", "value": "193.0.0.0 - 193.0.7.255"}]],
             "irr_records": [
                 [
                     {"key": "route", "value": "193.0.0.0/21"},

@@ -111,7 +111,9 @@ class BGPTools:
         self._path_analyzer = PathAnalyzer()
         self._as_analyzer = ASAnalyzer()
         self._resilience_assessor = ResilienceAssessor()
-        self._aspa_validator = create_aspa_validator(monocle=monocle)  # rpki_console wired via MCP path
+        self._aspa_validator = create_aspa_validator(
+            monocle=monocle
+        )  # rpki_console wired via MCP path
         self._stability_analyzer = StabilityAnalyzer()
         self._rov_coverage_analyzer = ROVCoverageAnalyzer()
 
@@ -415,7 +417,9 @@ class BGPTools:
             else:
                 # Default view - show both families
                 if ipv4:
-                    summary.append("**IPv4 prefixes:**" if full_list else "**IPv4 prefixes (sample):**")
+                    summary.append(
+                        "**IPv4 prefixes:**" if full_list else "**IPv4 prefixes (sample):**"
+                    )
                     if full_list:
                         for p in ipv4:
                             summary.append(f"  - {p}")
@@ -427,7 +431,9 @@ class BGPTools:
                     summary.append("")
 
                 if ipv6:
-                    summary.append("**IPv6 prefixes:**" if full_list else "**IPv6 prefixes (sample):**")
+                    summary.append(
+                        "**IPv6 prefixes:**" if full_list else "**IPv6 prefixes (sample):**"
+                    )
                     if full_list:
                         for p in ipv6:
                             summary.append(f"  - {p}")
@@ -608,7 +614,9 @@ class BGPTools:
 
                 if unique_paths_in_events:
                     summary.append("")
-                    summary.append(f"**Unique paths observed in changes:** {len(unique_paths_in_events)}")
+                    summary.append(
+                        f"**Unique paths observed in changes:** {len(unique_paths_in_events)}"
+                    )
                     # Extract upstream ASes (second-to-last in paths, when present)
                     upstream_asns: set[int] = set()
                     for path in unique_paths_in_events:
@@ -769,7 +777,9 @@ class BGPTools:
                             f"  - Sub-prefix exposure: prefixes up to /{max_len} can be announced"
                         )
                     else:
-                        summary.append("  - Sub-prefix exposure: NONE (maxLength matches announcement)")
+                        summary.append(
+                            "  - Sub-prefix exposure: NONE (maxLength matches announcement)"
+                        )
 
             return "\n".join(summary)
 
@@ -811,12 +821,14 @@ class BGPTools:
                         bucket = status if status in results else "not-found"
                         results[bucket].append(detail)
                     except Exception:
-                        results["not-found"].append({
-                            "status": "not-found",
-                            "prefix": prefix,
-                            "origin_asn": asn,
-                            "validating_roas": [],
-                        })
+                        results["not-found"].append(
+                            {
+                                "status": "not-found",
+                                "prefix": prefix,
+                                "origin_asn": asn,
+                                "validating_roas": [],
+                            }
+                        )
 
             await asyncio.gather(*(check_one(p) for p in prefixes))
 
@@ -860,7 +872,9 @@ class BGPTools:
 
             coverage = len(results["valid"]) + len(results["invalid"])
             coverage_pct = (coverage / len(prefixes) * 100) if prefixes else 0
-            summary.append(f"**RPKI coverage:** {coverage_pct:.1f}% ({coverage}/{len(prefixes)} prefixes have ROAs)")
+            summary.append(
+                f"**RPKI coverage:** {coverage_pct:.1f}% ({coverage}/{len(prefixes)} prefixes have ROAs)"
+            )
 
             return "\n".join(summary)
 
@@ -1654,7 +1668,9 @@ class BGPTools:
                                 f"  - AS{upstream.asn}{name_str} ({upstream.peers_percent:.1f}% visibility)"
                             )
                         summary.append("")
-                        summary.append("_Note: Data from connectivity analysis (relationship classification may differ from as2rel)._")
+                        summary.append(
+                            "_Note: Data from connectivity analysis (relationship classification may differ from as2rel)._"
+                        )
                         return "\n".join(summary)
                 except Exception:
                     pass
@@ -1881,8 +1897,10 @@ class BGPTools:
             # Format output
             path_str = " -> ".join(f"AS{asn}" for asn in result.as_path)
             state_emoji = {
-                "valid": "✅", "invalid": "❌",
-                "unknown": "❓", "unverifiable": "⚪",
+                "valid": "✅",
+                "invalid": "❌",
+                "unknown": "❓",
+                "unverifiable": "⚪",
             }.get(result.state.value, "⚠️")
 
             summary = [
@@ -1902,8 +1920,7 @@ class BGPTools:
                         None: "❓ unknown",
                     }[hop.is_authorized_provider]
                     summary.append(
-                        f"  - AS{hop.asn} -> AS{hop.next_asn}: "
-                        f"{auth_str} ({hop.relationship_type})"
+                        f"  - AS{hop.asn} -> AS{hop.next_asn}: {auth_str} ({hop.relationship_type})"
                     )
                 summary.append("")
 
@@ -1917,10 +1934,7 @@ class BGPTools:
             return "\n".join(summary)
 
         except ValueError:
-            return (
-                "Invalid AS path format. Use comma-separated ASNs "
-                "(e.g., '13335,174,15169')."
-            )
+            return "Invalid AS path format. Use comma-separated ASNs (e.g., '13335,174,15169')."
         except Exception as e:
             return f"Error verifying ASPA path: {str(e)}"
 
@@ -2364,9 +2378,7 @@ class BGPTools:
             Per-collector routing information with AS paths and communities.
         """
         try:
-            data = await self._ripe_stat.get_looking_glass(
-                prefix, collector=vantage_point
-            )
+            data = await self._ripe_stat.get_looking_glass(prefix, collector=vantage_point)
 
             rrcs = data.get("rrcs", [])
             if not rrcs:
@@ -2430,16 +2442,12 @@ class BGPTools:
             end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=UTC)
 
             # Get update activity data
-            activity_data = await self._ripe_stat.get_bgp_update_activity(
-                prefix, start, end
-            )
+            activity_data = await self._ripe_stat.get_bgp_update_activity(prefix, start, end)
 
             # Try to detect flaps from raw updates (shorter window for detail)
             flap_count = 0
             try:
-                updates_data = await self._ripe_stat.get_bgp_updates(
-                    prefix, start, end
-                )
+                updates_data = await self._ripe_stat.get_bgp_updates(prefix, start, end)
                 flaps = self._stability_analyzer.detect_flaps(updates_data)
                 flap_count = len(flaps)
             except Exception:
@@ -2482,13 +2490,10 @@ class BGPTools:
                     "significant route instability."
                 )
             elif report.is_stable:
-                summary.append(
-                    "**Status: STABLE** — This prefix has minimal route changes."
-                )
+                summary.append("**Status: STABLE** — This prefix has minimal route changes.")
             else:
                 summary.append(
-                    "**Status: MODERATE** — Some route activity detected, "
-                    "but within normal range."
+                    "**Status: MODERATE** — Some route activity detected, but within normal range."
                 )
 
             return "\n".join(summary)
@@ -2524,7 +2529,9 @@ class BGPTools:
             end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=UTC)
 
             data = await self._ripe_stat.get_bgp_update_activity(
-                resource, start, end,
+                resource,
+                start,
+                end,
                 min_sampling_period=sampling_hours * 3600,
             )
 
@@ -2589,9 +2596,7 @@ class BGPTools:
                 return f"No routes found for {prefix}. Cannot analyze ROV coverage."
 
             # Analyze coverage
-            report = self._rov_coverage_analyzer.analyze_prefix_coverage(
-                prefix, routes
-            )
+            report = self._rov_coverage_analyzer.analyze_prefix_coverage(prefix, routes)
 
             # Format report
             summary = [
@@ -2615,9 +2620,7 @@ class BGPTools:
                         f"[{cat}] — in {enforcer['path_count']} paths"
                     )
                 if len(report.rov_enforcers_in_paths) > 10:
-                    summary.append(
-                        f"  ... and {len(report.rov_enforcers_in_paths) - 10} more"
-                    )
+                    summary.append(f"  ... and {len(report.rov_enforcers_in_paths) - 10} more")
 
             return "\n".join(summary)
 

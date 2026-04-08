@@ -95,9 +95,7 @@ class StabilityAnalyzer:
             withdrawal_ratio = 0.0
 
         # Calculate rates per day
-        updates_per_day = self._calculate_rate_per_day(
-            total_updates, period_start, period_end
-        )
+        updates_per_day = self._calculate_rate_per_day(total_updates, period_start, period_end)
         withdrawals_per_day = self._calculate_rate_per_day(
             total_withdrawals, period_start, period_end
         )
@@ -110,13 +108,10 @@ class StabilityAnalyzer:
 
         # Stability flags based on withdrawal rate
         # Flap threshold scales with observation period (flaps/day, not raw count)
-        flaps_per_day = self._calculate_rate_per_day(
-            flap_count, period_start, period_end
-        )
+        flaps_per_day = self._calculate_rate_per_day(flap_count, period_start, period_end)
         is_stable = withdrawals_per_day < STABLE_THRESHOLD
         is_flapping = (
-            withdrawals_per_day > FLAPPING_THRESHOLD
-            or flaps_per_day > FLAPS_PER_DAY_THRESHOLD
+            withdrawals_per_day > FLAPPING_THRESHOLD or flaps_per_day > FLAPS_PER_DAY_THRESHOLD
         )
 
         return StabilityReport(
