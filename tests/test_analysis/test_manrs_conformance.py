@@ -73,23 +73,24 @@ class TestAction2AntiSpoofing:
     def assessor(self):
         return MANRSReadinessAssessor()
 
-    def test_always_unknown_and_unmeasurable(self, assessor):
-        """Anti-spoofing is always UNKNOWN since we can't measure it externally."""
+    def test_excluded_from_findings(self, assessor):
+        """Anti-spoofing should not appear in findings — it can't be measured."""
         report = assessor.assess(asn=64496, rpki_coverage=0.99)
-        anti_spoof = next(
-            f for f in report.action_findings if f.action == MANRSAction.ANTI_SPOOFING
-        )
-        assert anti_spoof.readiness == MANRSReadiness.UNKNOWN
-        assert anti_spoof.measurable is False
-        assert len(anti_spoof.recommendations) >= 1
+        actions_in_findings = [f.action for f in report.action_findings]
+        assert MANRSAction.ANTI_SPOOFING not in actions_in_findings
 
-    def test_has_self_verify_recommendation(self, assessor):
-        """Anti-spoofing should recommend self-verification."""
-        report = assessor.assess(asn=64496)
-        anti_spoof = next(
-            f for f in report.action_findings if f.action == MANRSAction.ANTI_SPOOFING
+    def test_excluded_from_score(self, assessor):
+        """Anti-spoofing should not affect the overall score."""
+        report = assessor.assess(asn=64496, rpki_coverage=0.99)
+        # Score should only reflect Actions 1, 3, 4
+        assert all(
+            f.action != MANRSAction.ANTI_SPOOFING for f in report.action_findings
         )
-        assert any("BCP38" in r or "uRPF" in r for r in anti_spoof.recommendations)
+
+    def test_mentioned_in_limitations(self, assessor):
+        """Limitations should note that Action 2 is excluded."""
+        report = assessor.assess(asn=64496)
+        assert any("Action 2" in lim or "anti-spoofing" in lim.lower() for lim in report.limitations)
 
 
 # --- Action 3: Coordination Tests ---
@@ -211,23 +212,22 @@ class TestOverallScoring:
         report = assessor.assess(asn=64496, rpki_coverage=0.8, contacts=contacts)
         assert report.overall_readiness == MANRSReadiness.ASPIRING
 
-    def test_always_four_action_findings(self, assessor):
-        """Report always contains exactly 4 action findings."""
+    def test_always_three_action_findings(self, assessor):
+        """Report contains 3 action findings (Action 2 excluded)."""
         report = assessor.assess(asn=64496)
-        assert len(report.action_findings) == 4
+        assert len(report.action_findings) == 3
         actions = {f.action for f in report.action_findings}
         assert actions == {
             MANRSAction.FILTERING,
-            MANRSAction.ANTI_SPOOFING,
             MANRSAction.COORDINATION,
             MANRSAction.VALIDATION,
         }
 
-    def test_limitations_include_anti_spoofing(self, assessor):
-        """Report always includes anti-spoofing limitation."""
+    def test_limitations_mention_excluded_action2(self, assessor):
+        """Report mentions Action 2 is excluded because it's unmeasurable."""
         report = assessor.assess(asn=64496)
         assert any(
-            "anti-spoofing" in lim.lower() or "spoofing" in lim.lower()
+            "action 2" in lim.lower() or "anti-spoofing" in lim.lower()
             for lim in report.limitations
         )
 

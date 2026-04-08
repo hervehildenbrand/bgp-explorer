@@ -22,12 +22,11 @@ from bgp_explorer.models.manrs import (
     MANRSReadinessReport,
 )
 
-# Scoring weights per action
+# Scoring weights per action (Action 2 Anti-Spoofing excluded — unmeasurable externally)
 ACTION_WEIGHTS: dict[MANRSAction, float] = {
-    MANRSAction.FILTERING: 0.30,
-    MANRSAction.ANTI_SPOOFING: 0.10,  # Low weight: unmeasurable externally
-    MANRSAction.COORDINATION: 0.25,
-    MANRSAction.VALIDATION: 0.35,
+    MANRSAction.FILTERING: 0.33,
+    MANRSAction.COORDINATION: 0.28,
+    MANRSAction.VALIDATION: 0.39,
 }
 
 READINESS_SCORES: dict[MANRSReadiness, float] = {
@@ -69,7 +68,8 @@ class MANRSReadinessAssessor:
         """Run MANRS readiness assessment."""
         findings = [
             self._assess_filtering(rpki_coverage, rov_report),
-            self._assess_anti_spoofing(),
+            # Action 2 (Anti-Spoofing) excluded — cannot be verified externally,
+            # would only add noise (unmeasurable → always UNKNOWN → inflates score)
             self._assess_coordination(contacts, whois_data),
             self._assess_validation(rpki_coverage, has_aspa),
         ]
@@ -254,8 +254,8 @@ class MANRSReadinessAssessor:
         )
 
         limitations = [
-            "Anti-spoofing (Action 2) cannot be verified externally — "
-            "requires self-assessment or active probing",
+            "Action 2 (Anti-Spoofing) excluded from scoring — cannot be verified "
+            "externally. Self-test with CAIDA Spoofer (spoofer.caida.org)",
             "Filtering (Action 1) assessed via ROV coverage proxy, "
             "not direct ingress filter verification",
         ]

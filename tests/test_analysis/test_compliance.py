@@ -618,13 +618,13 @@ class TestMANRSCompliance:
         assert report.framework == ComplianceFramework.MANRS
         assert report.asn == 64496
 
-    def test_manrs_four_categories(self, auditor):
-        """MANRS audit has exactly 4 categories (one per Action)."""
+    def test_manrs_three_categories(self, auditor):
+        """MANRS audit has 3 categories (Action 2 Anti-Spoofing excluded — unmeasurable)."""
         report = auditor.audit_manrs(asn=64496)
-        assert len(report.categories) == 4
+        assert len(report.categories) == 3
         cat_names = [c.category for c in report.categories]
         assert any("Filtering" in c for c in cat_names)
-        assert any("Anti-Spoofing" in c or "Spoofing" in c for c in cat_names)
+        assert not any("Anti-Spoofing" in c or "Spoofing" in c for c in cat_names)
         assert any("Coordination" in c for c in cat_names)
         assert any("Validation" in c for c in cat_names)
 

@@ -229,7 +229,7 @@ class ComplianceAuditor:
     ) -> ComplianceAuditReport:
         categories = [
             self._check_manrs_filtering(rpki_coverage, rov_report),
-            self._check_manrs_anti_spoofing(),
+            # Action 2 (Anti-Spoofing) excluded — cannot be verified externally
             self._check_manrs_coordination(contacts, whois_data),
             self._check_manrs_validation(rpki_coverage, has_aspa),
         ]
