@@ -1,5 +1,6 @@
 # BGP Explorer
 
+[![PyPI](https://img.shields.io/pypi/v/bgp-explorer)](https://pypi.org/project/bgp-explorer/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://github.com/hervehildenbrand/bgp-explorer/actions/workflows/test.yml/badge.svg)](https://github.com/hervehildenbrand/bgp-explorer/actions/workflows/test.yml)
@@ -33,12 +34,25 @@ AI-powered CLI for querying live and historical internet routing data using natu
 
 ## Quick Start
 
+### Install from PyPI
+
+```bash
+pip install bgp-explorer
+# or
+uv tool install bgp-explorer
+
+bgp-explorer install-deps  # Auto-installs Go + Rust + monocle + bgp-radar
+bgp-explorer chat          # All 8 investigation tools ready!
+```
+
+### Install from source
+
 ```bash
 git clone https://github.com/hervehildenbrand/bgp-explorer.git
 cd bgp-explorer
 uv sync
-uv run bgp-explorer install-deps  # Auto-installs Go + Rust + binaries
-uv run bgp-explorer chat          # All 8 investigation tools ready!
+uv run bgp-explorer install-deps
+uv run bgp-explorer chat
 ```
 
 ## Use with Claude Code (No API Key Needed)
@@ -46,12 +60,9 @@ uv run bgp-explorer chat          # All 8 investigation tools ready!
 If you have a **Claude Code subscription** (Pro/Max), you can use BGP Explorer tools directly in Claude Code without needing an Anthropic API key:
 
 ```bash
-# 1. Clone and install globally
-git clone https://github.com/hervehildenbrand/bgp-explorer.git
-cd bgp-explorer
-uv sync
-uv run bgp-explorer install-deps
-uv tool install .  # Installs bgp-explorer globally
+# 1. Install from PyPI
+pip install bgp-explorer
+bgp-explorer install-deps
 
 # 2. Add as MCP server
 claude mcp add bgp-explorer -- bgp-explorer mcp
@@ -65,11 +76,10 @@ claude
 
 ### Fix Broken MCP Installation
 
-If MCP isn't working ("Failed to reconnect"), reinstall globally:
+If MCP isn't working ("Failed to reconnect"), reinstall:
 
 ```bash
-cd /path/to/bgp-explorer  # Go to your clone
-uv tool install .
+pip install --force-reinstall bgp-explorer
 claude mcp remove bgp-explorer 2>/dev/null
 claude mcp add bgp-explorer -- bgp-explorer mcp
 ```
