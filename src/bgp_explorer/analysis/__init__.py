@@ -3,7 +3,9 @@
 from bgp_explorer.analysis.as_analysis import ASAnalyzer
 from bgp_explorer.analysis.aspa_validation import (
     ASPAValidator,
+    CompositeASPAProvider,
     MonocleASPAProvider,
+    RpkiClientASPAProvider,
     create_aspa_validator,
 )
 from bgp_explorer.analysis.compliance import (
@@ -18,6 +20,8 @@ __all__ = [
     "ASAnalyzer",
     "ASPAValidator",
     "MonocleASPAProvider",
+    "RpkiClientASPAProvider",
+    "CompositeASPAProvider",
     "create_aspa_validator",
     "ComplianceAuditor",
     "ComplianceAuditReport",

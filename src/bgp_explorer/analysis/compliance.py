@@ -20,6 +20,7 @@ from bgp_explorer.analysis.stability import StabilityReport
 class ComplianceFramework(Enum):
     DORA = "DORA"
     NIS2 = "NIS2"
+    MANRS = "MANRS"
 
 
 class ComplianceLevel(Enum):
@@ -112,6 +113,18 @@ class ComplianceAuditReport:
         }
 
 
+def _has_contacts(data: dict | None) -> bool:
+    """Check if contact data contains any actual contact info."""
+    if not data:
+        return False
+    for _key, value in data.items():
+        if value and isinstance(value, str) and "@" in value:
+            return True
+        if value and isinstance(value, list) and any(v for v in value):
+            return True
+    return False
+
+
 class ComplianceAuditor:
     """Auditor that maps BGP analysis results to DORA and NIS 2 requirements.
 
@@ -151,10 +164,11 @@ class ComplianceAuditor:
         rov_report: ROVCoverageReport | None = None,
         contacts: dict | None = None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceAuditReport:
         categories = [
             self._check_dora_ict_risk(
-                resilience_report, stability_report, rov_report, rpki_coverage
+                resilience_report, stability_report, rov_report, rpki_coverage, has_aspa
             ),
             self._check_dora_third_party(resilience_report),
             self._check_dora_incident_mgmt(stability_report, contacts),
@@ -169,10 +183,11 @@ class ComplianceAuditor:
         rov_report: ROVCoverageReport | None = None,
         aspa_results: list[dict] | None = None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceAuditReport:
         categories = [
             self._check_nis2_risk_mgmt(
-                resilience_report, rov_report, aspa_results, rpki_coverage
+                resilience_report, rov_report, aspa_results, rpki_coverage, has_aspa
             ),
             self._check_nis2_incident_reporting(stability_report),
         ]
@@ -187,14 +202,78 @@ class ComplianceAuditor:
         aspa_results: list[dict] | None = None,
         contacts: dict | None = None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> tuple[ComplianceAuditReport, ComplianceAuditReport]:
         dora = self.audit_dora(
-            asn, resilience_report, stability_report, rov_report, contacts, rpki_coverage
+            asn, resilience_report, stability_report, rov_report, contacts, rpki_coverage, has_aspa
         )
         nis2 = self.audit_nis2(
-            asn, resilience_report, stability_report, rov_report, aspa_results, rpki_coverage
+            asn,
+            resilience_report,
+            stability_report,
+            rov_report,
+            aspa_results,
+            rpki_coverage,
+            has_aspa,
         )
         return dora, nis2
+
+    def audit_manrs(
+        self,
+        asn: int,
+        rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
+        rov_report: ROVCoverageReport | None = None,
+        contacts: dict | None = None,
+        whois_data: dict | None = None,
+    ) -> ComplianceAuditReport:
+        categories = [
+            self._check_manrs_filtering(rpki_coverage, rov_report),
+            # Action 2 (Anti-Spoofing) excluded — cannot be verified externally
+            self._check_manrs_coordination(contacts, whois_data),
+            self._check_manrs_validation(rpki_coverage, has_aspa),
+        ]
+        return self._build_report(asn, ComplianceFramework.MANRS, categories)
+
+    def audit_all(
+        self,
+        asn: int,
+        resilience_report: ResilienceReport,
+        stability_report: StabilityReport | None = None,
+        rov_report: ROVCoverageReport | None = None,
+        aspa_results: list[dict] | None = None,
+        contacts: dict | None = None,
+        rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
+        whois_data: dict | None = None,
+    ) -> tuple[ComplianceAuditReport, ComplianceAuditReport, ComplianceAuditReport]:
+        dora = self.audit_dora(
+            asn,
+            resilience_report,
+            stability_report,
+            rov_report,
+            contacts,
+            rpki_coverage,
+            has_aspa,
+        )
+        nis2 = self.audit_nis2(
+            asn,
+            resilience_report,
+            stability_report,
+            rov_report,
+            aspa_results,
+            rpki_coverage,
+            has_aspa,
+        )
+        manrs = self.audit_manrs(
+            asn,
+            rpki_coverage,
+            has_aspa,
+            rov_report,
+            contacts,
+            whois_data,
+        )
+        return dora, nis2, manrs
 
     def format_report(self, report: ComplianceAuditReport) -> str:
         lines = [
@@ -271,16 +350,13 @@ class ComplianceAuditor:
             f
             for c in categories
             for f in c.findings
-            if f.severity == Severity.CRITICAL
-            and f.status == ComplianceLevel.NON_COMPLIANT
+            if f.severity == Severity.CRITICAL and f.status == ComplianceLevel.NON_COMPLIANT
         ]
 
         # Build summary
         total_findings = sum(len(c.findings) for c in categories)
         non_compliant = sum(
-            1 for c in categories
-            for f in c.findings
-            if f.status == ComplianceLevel.NON_COMPLIANT
+            1 for c in categories for f in c.findings if f.status == ComplianceLevel.NON_COMPLIANT
         )
         summary = (
             f"{framework.value} audit for AS{asn}: "
@@ -307,6 +383,7 @@ class ComplianceAuditor:
         stability: StabilityReport | None,
         rov: ROVCoverageReport | None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceCategoryReport:
         findings: list[ComplianceFinding] = []
 
@@ -319,125 +396,180 @@ class ComplianceAuditor:
                     f"{resilience.ddos_provider_detected} (DDoS provider) is not real transit diversity"
                 )
             else:
-                evidence = f"Single transit provider detected ({resilience.upstream_count} upstream)"
-            findings.append(ComplianceFinding(
-                article="Art. 6(8)",
-                requirement="ICT concentration risk - transit diversity",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.CRITICAL,
-                evidence=evidence,
-                recommendation="Add at least one more independent transit provider to eliminate single point of failure",
-                data_source="resilience",
-            ))
+                evidence = (
+                    f"Single transit provider detected ({resilience.upstream_count} upstream)"
+                )
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 6(8)",
+                    requirement="ICT concentration risk - transit diversity",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.CRITICAL,
+                    evidence=evidence,
+                    recommendation="Add at least one more independent transit provider to eliminate single point of failure",
+                    data_source="resilience",
+                )
+            )
         else:
-            findings.append(ComplianceFinding(
-                article="Art. 6(8)",
-                requirement="ICT concentration risk - transit diversity",
-                status=ComplianceLevel.COMPLIANT,
-                severity=Severity.CRITICAL,
-                evidence=f"{resilience.upstream_count} transit providers detected",
-                recommendation="",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 6(8)",
+                    requirement="ICT concentration risk - transit diversity",
+                    status=ComplianceLevel.COMPLIANT,
+                    severity=Severity.CRITICAL,
+                    evidence=f"{resilience.upstream_count} transit providers detected",
+                    recommendation="",
+                    data_source="resilience",
+                )
+            )
 
         # Low resilience score (HIGH)
         if resilience.score < 5:
-            findings.append(ComplianceFinding(
-                article="Art. 5",
-                requirement="ICT risk management framework",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence=f"Network resilience score {resilience.score:.1f}/10 (below threshold of 5)",
-                recommendation="Improve network diversity: add transit providers, expand peering, join IXPs",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 5",
+                    requirement="ICT risk management framework",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence=f"Network resilience score {resilience.score:.1f}/10 (below threshold of 5)",
+                    recommendation="Improve network diversity: add transit providers, expand peering, join IXPs",
+                    data_source="resilience",
+                )
+            )
 
         # ROA deployment — ASN's own responsibility (HIGH)
         if rpki_coverage is not None:
             if rpki_coverage >= 0.8:
-                findings.append(ComplianceFinding(
-                    article="Art. 9(2)",
-                    requirement="ROA deployment for route origin authorization",
-                    status=ComplianceLevel.COMPLIANT,
-                    severity=Severity.HIGH,
-                    evidence=f"RPKI ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
-                    recommendation="",
-                    data_source="rpki_validation",
-                ))
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 9(2)",
+                        requirement="ROA deployment for route origin authorization",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"RPKI ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
+                        recommendation="",
+                        data_source="rpki_validation",
+                    )
+                )
             else:
-                findings.append(ComplianceFinding(
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 9(2)",
+                        requirement="ROA deployment for route origin authorization",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage: only {rpki_coverage:.0%} of prefixes have ROAs",
+                        recommendation="Create RPKI ROAs for all announced prefixes via your RIR portal",
+                        data_source="rpki_validation",
+                    )
+                )
+        elif rov is not None and rov.protection_level == "low":
+            # No direct RPKI data — fall back to ROV as proxy
+            findings.append(
+                ComplianceFinding(
                     article="Art. 9(2)",
                     requirement="ROA deployment for route origin authorization",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.HIGH,
-                    evidence=f"Low ROA coverage: only {rpki_coverage:.0%} of prefixes have ROAs",
-                    recommendation="Create RPKI ROAs for all announced prefixes via your RIR portal",
-                    data_source="rpki_validation",
-                ))
-        elif rov is not None and rov.protection_level == "low":
-            # No direct RPKI data — fall back to ROV as proxy
-            findings.append(ComplianceFinding(
-                article="Art. 9(2)",
-                requirement="ROA deployment for route origin authorization",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests possible missing ROAs",
-                recommendation="Verify ROA deployment via your RIR portal and create ROAs for all prefixes",
-                data_source="rov_coverage",
-            ))
+                    evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests possible missing ROAs",
+                    recommendation="Verify ROA deployment via your RIR portal and create ROAs for all prefixes",
+                    data_source="rov_coverage",
+                )
+            )
         else:
-            findings.append(ComplianceFinding(
-                article="Art. 9(2)",
-                requirement="ROA deployment for route origin authorization",
-                status=ComplianceLevel.NOT_ASSESSED,
-                severity=Severity.HIGH,
-                evidence="RPKI validation data not available",
-                recommendation="Run RPKI validation check to assess ROA deployment",
-                data_source="rpki_validation",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 9(2)",
+                    requirement="ROA deployment for route origin authorization",
+                    status=ComplianceLevel.NOT_ASSESSED,
+                    severity=Severity.HIGH,
+                    evidence="RPKI validation data not available",
+                    recommendation="Run RPKI validation check to assess ROA deployment",
+                    data_source="rpki_validation",
+                )
+            )
 
         # ROV enforcement coverage — ecosystem issue (INFO)
         if rov is not None:
-            findings.append(ComplianceFinding(
-                article="Art. 9(2)",
-                requirement="ROV enforcement coverage (ecosystem)",
-                status=ComplianceLevel.PARTIAL if rov.protection_level != "high" else ComplianceLevel.COMPLIANT,
-                severity=Severity.INFO,
-                evidence=(
-                    f"ROV enforcement: {rov.path_coverage:.0%} of paths pass through ROV-enforcing networks. "
-                    f"This reflects upstream/ecosystem adoption, not the ASN's own deployment."
-                ),
-                recommendation=(
-                    "Encourage transit providers to enforce ROV filtering"
-                    if rov.protection_level != "high" else ""
-                ),
-                data_source="rov_coverage",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 9(2)",
+                    requirement="ROV enforcement coverage (ecosystem)",
+                    status=ComplianceLevel.PARTIAL
+                    if rov.protection_level != "high"
+                    else ComplianceLevel.COMPLIANT,
+                    severity=Severity.INFO,
+                    evidence=(
+                        f"ROV enforcement: {rov.path_coverage:.0%} of paths pass through ROV-enforcing networks. "
+                        f"This reflects upstream/ecosystem adoption, not the ASN's own deployment."
+                    ),
+                    recommendation=(
+                        "Encourage transit providers to enforce ROV filtering"
+                        if rov.protection_level != "high"
+                        else ""
+                    ),
+                    data_source="rov_coverage",
+                )
+            )
+
+        # ASPA deployment (MEDIUM — recommended, not yet mandatory)
+        if has_aspa is not None:
+            if has_aspa:
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 9(2)",
+                        requirement="ASPA deployment for path authorization",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence="ASPA object published — route leak protection enabled",
+                        recommendation="",
+                        data_source="rpki_aspa",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 9(2)",
+                        requirement="ASPA deployment for path authorization",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.MEDIUM,
+                        evidence="No ASPA object published — no path-level route leak protection",
+                        recommendation=(
+                            "Publish an ASPA object at your RIR portal to authorize upstream "
+                            "providers and protect against route leaks"
+                        ),
+                        data_source="rpki_aspa",
+                    )
+                )
 
         # Route instability (MEDIUM)
         if stability is not None:
             if stability.is_flapping:
-                findings.append(ComplianceFinding(
-                    article="Art. 10",
-                    requirement="ICT system stability monitoring",
-                    status=ComplianceLevel.NON_COMPLIANT,
-                    severity=Severity.MEDIUM,
-                    evidence=f"Route flapping detected: {stability.withdrawals_per_day:.0f} withdrawals/day, {stability.flap_count} W→A flaps",
-                    recommendation="Investigate route instability and implement route dampening",
-                    data_source="stability",
-                ))
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 10",
+                        requirement="ICT system stability monitoring",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence=f"Route flapping detected: {stability.withdrawals_per_day:.0f} withdrawals/day, {stability.flap_count} W→A flaps",
+                        recommendation="Investigate route instability and implement route dampening",
+                        data_source="stability",
+                    )
+                )
 
         # Low path redundancy (MEDIUM)
         if resilience.path_redundancy_score < 0.5:
-            findings.append(ComplianceFinding(
-                article="Art. 11(1)",
-                requirement="ICT path redundancy",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.MEDIUM,
-                evidence=f"Path redundancy score {resilience.path_redundancy_score:.0%} (below 50%)",
-                recommendation="Ensure multiple upstream paths are advertised for redundancy",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 11(1)",
+                    requirement="ICT path redundancy",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence=f"Path redundancy score {resilience.path_redundancy_score:.0%} (below 50%)",
+                    recommendation="Ensure multiple upstream paths are advertised for redundancy",
+                    data_source="resilience",
+                )
+            )
 
         score = self._calculate_category_score(findings)
         return ComplianceCategoryReport(
@@ -464,51 +596,59 @@ class ComplianceAuditor:
                 )
             else:
                 evidence = f"Only {resilience.upstream_count} upstream provider(s) — critical concentration risk"
-            findings.append(ComplianceFinding(
-                article="Art. 28(1)",
-                requirement="ICT third-party provider concentration risk",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.CRITICAL,
-                evidence=evidence,
-                recommendation="Diversify transit providers to reduce third-party concentration",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 28(1)",
+                    requirement="ICT third-party provider concentration risk",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.CRITICAL,
+                    evidence=evidence,
+                    recommendation="Diversify transit providers to reduce third-party concentration",
+                    data_source="resilience",
+                )
+            )
 
         # Geographic concentration / IXP presence (HIGH)
         if resilience.ixp_count < 2:
-            findings.append(ComplianceFinding(
-                article="Art. 28(5)",
-                requirement="Geographic diversification of ICT services",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence=f"Only {resilience.ixp_count} IXP(s) — limited geographic diversity",
-                recommendation="Join additional IXPs in different locations for geographic diversity",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 28(5)",
+                    requirement="Geographic diversification of ICT services",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence=f"Only {resilience.ixp_count} IXP(s) — limited geographic diversity",
+                    recommendation="Join additional IXPs in different locations for geographic diversity",
+                    data_source="resilience",
+                )
+            )
 
         # DDoS provider dependency (MEDIUM info)
         if resilience.ddos_provider_detected:
-            findings.append(ComplianceFinding(
-                article="Art. 29(2)",
-                requirement="DDoS mitigation provider dependency",
-                status=ComplianceLevel.PARTIAL,
-                severity=Severity.MEDIUM,
-                evidence=f"DDoS provider detected in upstream path: {resilience.ddos_provider_detected}",
-                recommendation="Ensure direct paths are available as backup to DDoS mitigation provider",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 29(2)",
+                    requirement="DDoS mitigation provider dependency",
+                    status=ComplianceLevel.PARTIAL,
+                    severity=Severity.MEDIUM,
+                    evidence=f"DDoS provider detected in upstream path: {resilience.ddos_provider_detected}",
+                    recommendation="Ensure direct paths are available as backup to DDoS mitigation provider",
+                    data_source="resilience",
+                )
+            )
 
         # Limited peering (MEDIUM)
         if resilience.peer_count < 20:
-            findings.append(ComplianceFinding(
-                article="Art. 30(2)",
-                requirement="Peering relationship breadth",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.MEDIUM,
-                evidence=f"Only {resilience.peer_count} peers — limited DDoS absorption capacity",
-                recommendation="Expand peering relationships for improved resilience and traffic optimization",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 30(2)",
+                    requirement="Peering relationship breadth",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence=f"Only {resilience.peer_count} peers — limited DDoS absorption capacity",
+                    recommendation="Expand peering relationships for improved resilience and traffic optimization",
+                    data_source="resilience",
+                )
+            )
 
         score = self._calculate_category_score(findings)
         return ComplianceCategoryReport(
@@ -528,39 +668,45 @@ class ComplianceAuditor:
 
         # No stability monitoring (HIGH)
         if stability is None:
-            findings.append(ComplianceFinding(
-                article="Art. 17",
-                requirement="ICT incident detection capability",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence="No stability monitoring data available — cannot detect routing incidents",
-                recommendation="Implement BGP monitoring to detect routing anomalies and incidents",
-                data_source="stability",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 17",
+                    requirement="ICT incident detection capability",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence="No stability monitoring data available — cannot detect routing incidents",
+                    recommendation="Implement BGP monitoring to detect routing anomalies and incidents",
+                    data_source="stability",
+                )
+            )
         else:
             # High incident rate (MEDIUM)
             if stability.withdrawals_per_day > 30:
-                findings.append(ComplianceFinding(
-                    article="Art. 19(1)",
-                    requirement="ICT incident rate monitoring",
-                    status=ComplianceLevel.NON_COMPLIANT,
-                    severity=Severity.MEDIUM,
-                    evidence=f"High withdrawal rate: {stability.withdrawals_per_day:.0f} withdrawals/day",
-                    recommendation="Investigate high update frequency and establish baseline thresholds",
-                    data_source="stability",
-                ))
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 19(1)",
+                        requirement="ICT incident rate monitoring",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence=f"High withdrawal rate: {stability.withdrawals_per_day:.0f} withdrawals/day",
+                        recommendation="Investigate high update frequency and establish baseline thresholds",
+                        data_source="stability",
+                    )
+                )
 
         # No abuse contact (MEDIUM)
         if contacts is not None and not contacts:
-            findings.append(ComplianceFinding(
-                article="Art. 20(1)",
-                requirement="Incident reporting contacts",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.MEDIUM,
-                evidence="No abuse contact information found",
-                recommendation="Register abuse contact in WHOIS/RIR database",
-                data_source="contacts",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 20(1)",
+                    requirement="Incident reporting contacts",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence="No abuse contact information found",
+                    recommendation="Register abuse contact in WHOIS/RIR database",
+                    data_source="contacts",
+                )
+            )
 
         score = self._calculate_category_score(findings)
         return ComplianceCategoryReport(
@@ -579,20 +725,23 @@ class ComplianceAuditor:
         rov: ROVCoverageReport | None,
         aspa_results: list[dict] | None,
         rpki_coverage: float | None = None,
+        has_aspa: bool | None = None,
     ) -> ComplianceCategoryReport:
         findings: list[ComplianceFinding] = []
 
         # Network resilience (HIGH)
         if resilience.score < 5:
-            findings.append(ComplianceFinding(
-                article="Art. 21(2)(a)",
-                requirement="Risk analysis and information system security",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence=f"Network resilience score {resilience.score:.1f}/10 (below threshold of 5)",
-                recommendation="Improve network diversity and redundancy",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 21(2)(a)",
+                    requirement="Risk analysis and information system security",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence=f"Network resilience score {resilience.score:.1f}/10 (below threshold of 5)",
+                    recommendation="Improve network diversity and redundancy",
+                    data_source="resilience",
+                )
+            )
 
         # Business continuity (HIGH)
         effective_single = self._is_effective_single_transit(resilience)
@@ -608,113 +757,164 @@ class ComplianceAuditor:
                     issues.append(f"{resilience.upstream_count} upstream(s)")
             if resilience.ixp_count < 2:
                 issues.append(f"{resilience.ixp_count} IXP(s)")
-            findings.append(ComplianceFinding(
-                article="Art. 21(2)(c)",
-                requirement="Business continuity and crisis management",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence=f"Insufficient redundancy: {', '.join(issues)}",
-                recommendation="Add transit providers and join additional IXPs for business continuity",
-                data_source="resilience",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 21(2)(c)",
+                    requirement="Business continuity and crisis management",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence=f"Insufficient redundancy: {', '.join(issues)}",
+                    recommendation="Add transit providers and join additional IXPs for business continuity",
+                    data_source="resilience",
+                )
+            )
 
         # Supply chain RPKI — ROA deployment (HIGH)
         if rpki_coverage is not None:
             if rpki_coverage >= 0.8:
-                findings.append(ComplianceFinding(
-                    article="Art. 21(2)(d)",
-                    requirement="Supply chain security — ROA deployment",
-                    status=ComplianceLevel.COMPLIANT,
-                    severity=Severity.HIGH,
-                    evidence=f"RPKI ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
-                    recommendation="",
-                    data_source="rpki_validation",
-                ))
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 21(2)(d)",
+                        requirement="Supply chain security — ROA deployment",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"RPKI ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
+                        recommendation="",
+                        data_source="rpki_validation",
+                    )
+                )
             else:
-                findings.append(ComplianceFinding(
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 21(2)(d)",
+                        requirement="Supply chain security — ROA deployment",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage: only {rpki_coverage:.0%} of prefixes have ROAs",
+                        recommendation="Create RPKI ROAs for all announced prefixes",
+                        data_source="rpki_validation",
+                    )
+                )
+        elif rov is not None and rov.protection_level == "low":
+            findings.append(
+                ComplianceFinding(
                     article="Art. 21(2)(d)",
                     requirement="Supply chain security — ROA deployment",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.HIGH,
-                    evidence=f"Low ROA coverage: only {rpki_coverage:.0%} of prefixes have ROAs",
-                    recommendation="Create RPKI ROAs for all announced prefixes",
-                    data_source="rpki_validation",
-                ))
-        elif rov is not None and rov.protection_level == "low":
-            findings.append(ComplianceFinding(
-                article="Art. 21(2)(d)",
-                requirement="Supply chain security — ROA deployment",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests possible missing ROAs",
-                recommendation="Verify ROA deployment and create ROAs for all prefixes",
-                data_source="rov_coverage",
-            ))
+                    evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests possible missing ROAs",
+                    recommendation="Verify ROA deployment and create ROAs for all prefixes",
+                    data_source="rov_coverage",
+                )
+            )
         else:
-            findings.append(ComplianceFinding(
-                article="Art. 21(2)(d)",
-                requirement="Supply chain security — ROA deployment",
-                status=ComplianceLevel.NOT_ASSESSED,
-                severity=Severity.HIGH,
-                evidence="RPKI validation data not available",
-                recommendation="Run RPKI validation to assess supply chain routing security",
-                data_source="rpki_validation",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 21(2)(d)",
+                    requirement="Supply chain security — ROA deployment",
+                    status=ComplianceLevel.NOT_ASSESSED,
+                    severity=Severity.HIGH,
+                    evidence="RPKI validation data not available",
+                    recommendation="Run RPKI validation to assess supply chain routing security",
+                    data_source="rpki_validation",
+                )
+            )
 
         # Supply chain — ROV enforcement (INFO, ecosystem issue)
         if rov is not None:
-            findings.append(ComplianceFinding(
-                article="Art. 21(2)(d)",
-                requirement="Supply chain ROV enforcement (ecosystem)",
-                status=ComplianceLevel.PARTIAL if rov.protection_level != "high" else ComplianceLevel.COMPLIANT,
-                severity=Severity.INFO,
-                evidence=(
-                    f"ROV enforcement: {rov.path_coverage:.0%} of paths through ROV-enforcing networks. "
-                    f"This is an ecosystem metric, not under the ASN's direct control."
-                ),
-                recommendation=(
-                    "Encourage transit providers to enforce ROV"
-                    if rov.protection_level != "high" else ""
-                ),
-                data_source="rov_coverage",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 21(2)(d)",
+                    requirement="Supply chain ROV enforcement (ecosystem)",
+                    status=ComplianceLevel.PARTIAL
+                    if rov.protection_level != "high"
+                    else ComplianceLevel.COMPLIANT,
+                    severity=Severity.INFO,
+                    evidence=(
+                        f"ROV enforcement: {rov.path_coverage:.0%} of paths through ROV-enforcing networks. "
+                        f"This is an ecosystem metric, not under the ASN's direct control."
+                    ),
+                    recommendation=(
+                        "Encourage transit providers to enforce ROV"
+                        if rov.protection_level != "high"
+                        else ""
+                    ),
+                    data_source="rov_coverage",
+                )
+            )
 
         # Route leak vulnerability via ASPA (MEDIUM)
         if aspa_results is not None:
             invalid_paths = [r for r in aspa_results if r.get("valid") is False]
             if invalid_paths:
-                findings.append(ComplianceFinding(
-                    article="Art. 21(2)(d)",
-                    requirement="Route leak vulnerability (ASPA validation)",
-                    status=ComplianceLevel.NON_COMPLIANT,
-                    severity=Severity.MEDIUM,
-                    evidence=f"{len(invalid_paths)} invalid AS paths detected via ASPA validation",
-                    recommendation="Investigate and remediate invalid routing paths",
-                    data_source="aspa",
-                ))
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 21(2)(d)",
+                        requirement="Route leak vulnerability (ASPA validation)",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence=f"{len(invalid_paths)} invalid AS paths detected via ASPA validation",
+                        recommendation="Investigate and remediate invalid routing paths",
+                        data_source="aspa",
+                    )
+                )
+
+        # ASPA deployment for routing security (MEDIUM — recommended)
+        if has_aspa is not None:
+            if has_aspa:
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 21(2)(e)",
+                        requirement="Routing security — ASPA deployment",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence="ASPA object published — route leak protection enabled via RPKI",
+                        recommendation="",
+                        data_source="rpki_aspa",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 21(2)(e)",
+                        requirement="Routing security — ASPA deployment",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.MEDIUM,
+                        evidence="No ASPA object published — no cryptographic route leak protection",
+                        recommendation=(
+                            "Publish an ASPA object at your RIR portal to complement "
+                            "ROA-based origin validation with path-level authorization"
+                        ),
+                        data_source="rpki_aspa",
+                    )
+                )
 
         # Routing security — ROA deployment (HIGH)
         if rpki_coverage is not None:
             if rpki_coverage < 0.8:
-                findings.append(ComplianceFinding(
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 21(2)(e)",
+                        requirement="Routing security — RPKI ROA deployment",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
+                        recommendation="Implement RPKI ROAs for all announced prefixes",
+                        data_source="rpki_validation",
+                    )
+                )
+        elif rov is not None and rov.protection_level == "low":
+            findings.append(
+                ComplianceFinding(
                     article="Art. 21(2)(e)",
                     requirement="Routing security — RPKI ROA deployment",
                     status=ComplianceLevel.NON_COMPLIANT,
                     severity=Severity.HIGH,
-                    evidence=f"Low ROA coverage: {rpki_coverage:.0%} of prefixes have ROAs",
-                    recommendation="Implement RPKI ROAs for all announced prefixes",
-                    data_source="rpki_validation",
-                ))
-        elif rov is not None and rov.protection_level == "low":
-            findings.append(ComplianceFinding(
-                article="Art. 21(2)(e)",
-                requirement="Routing security — RPKI ROA deployment",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests RPKI gaps",
-                recommendation="Implement RPKI for all announced prefixes",
-                data_source="rov_coverage",
-            ))
+                    evidence=f"Low ROV path coverage ({rov.path_coverage:.0%}) suggests RPKI gaps",
+                    recommendation="Implement RPKI for all announced prefixes",
+                    data_source="rov_coverage",
+                )
+            )
 
         score = self._calculate_category_score(findings)
         return ComplianceCategoryReport(
@@ -733,32 +933,302 @@ class ComplianceAuditor:
 
         # Incident detection capability (HIGH)
         if stability is None:
-            findings.append(ComplianceFinding(
-                article="Art. 23(1)",
-                requirement="Incident detection capability",
-                status=ComplianceLevel.NON_COMPLIANT,
-                severity=Severity.HIGH,
-                evidence="No stability monitoring data — cannot detect and report incidents",
-                recommendation="Implement BGP monitoring for incident detection and reporting",
-                data_source="stability",
-            ))
+            findings.append(
+                ComplianceFinding(
+                    article="Art. 23(1)",
+                    requirement="Incident detection capability",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.HIGH,
+                    evidence="No stability monitoring data — cannot detect and report incidents",
+                    recommendation="Implement BGP monitoring for incident detection and reporting",
+                    data_source="stability",
+                )
+            )
         else:
             # Baseline monitoring (MEDIUM)
             if not stability.is_stable:
-                findings.append(ComplianceFinding(
-                    article="Art. 23(4)",
-                    requirement="Baseline monitoring for incident reporting",
-                    status=ComplianceLevel.NON_COMPLIANT,
-                    severity=Severity.MEDIUM,
-                    evidence=f"Route instability detected: {stability.withdrawals_per_day:.0f} withdrawals/day",
-                    recommendation="Establish baseline monitoring thresholds and investigate instability",
-                    data_source="stability",
-                ))
+                findings.append(
+                    ComplianceFinding(
+                        article="Art. 23(4)",
+                        requirement="Baseline monitoring for incident reporting",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence=f"Route instability detected: {stability.withdrawals_per_day:.0f} withdrawals/day",
+                        recommendation="Establish baseline monitoring thresholds and investigate instability",
+                        data_source="stability",
+                    )
+                )
 
         score = self._calculate_category_score(findings)
         return ComplianceCategoryReport(
             category="Incident Reporting Capability",
             articles=["Art. 23"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    # --- MANRS Checks ---
+
+    def _check_manrs_filtering(
+        self,
+        rpki_coverage: float | None,
+        rov_report: ROVCoverageReport | None,
+    ) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = []
+
+        if rpki_coverage is not None and rov_report is not None:
+            if rpki_coverage >= 0.9 and rov_report.protection_level == "high":
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}, ROV path coverage: {rov_report.path_coverage:.0%}",
+                        recommendation="",
+                        data_source="rov_coverage",
+                    )
+                )
+            elif rpki_coverage >= 0.7 or rov_report.protection_level == "medium":
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}, ROV: {rov_report.protection_level}",
+                        recommendation="Increase ROA coverage to 90%+ and encourage ROV enforcement",
+                        data_source="rov_coverage",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage ({rpki_coverage:.0%}) and ROV ({rov_report.protection_level})",
+                        recommendation="Deploy RPKI ROAs and encourage upstream ROV filtering",
+                        data_source="rov_coverage",
+                    )
+                )
+        elif rpki_coverage is not None:
+            if rpki_coverage >= 0.7:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%} (ROV data unavailable)",
+                        recommendation="Increase ROA coverage and verify ROV enforcement",
+                        data_source="rpki_validation",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 1",
+                        requirement="Prefix filtering via ROV enforcement",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="Deploy RPKI ROAs for all announced prefixes",
+                        data_source="rpki_validation",
+                    )
+                )
+        else:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 1",
+                    requirement="Prefix filtering via ROV enforcement",
+                    status=ComplianceLevel.NOT_ASSESSED,
+                    severity=Severity.HIGH,
+                    evidence="No RPKI or ROV data available",
+                    recommendation="Run RPKI validation to assess filtering readiness",
+                    data_source="rpki_validation",
+                )
+            )
+
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 1: Filtering",
+            articles=["Prevent propagation of incorrect routing information"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    def _check_manrs_anti_spoofing(self) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = [
+            ComplianceFinding(
+                article="Action 2",
+                requirement="Source address validation (BCP38/uRPF)",
+                status=ComplianceLevel.NOT_ASSESSED,
+                severity=Severity.MEDIUM,
+                evidence="Anti-spoofing cannot be verified externally",
+                recommendation="Self-verify BCP38/uRPF on customer-facing interfaces; test via CAIDA Spoofer",
+                data_source="none",
+            )
+        ]
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 2: Anti-Spoofing",
+            articles=["Prevent traffic with spoofed source IP addresses"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    def _check_manrs_coordination(
+        self,
+        contacts: dict | None,
+        whois_data: dict | None,
+    ) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = []
+
+        has_peeringdb = _has_contacts(contacts)
+        has_whois = _has_contacts(whois_data)
+
+        if has_peeringdb and has_whois:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 3",
+                    requirement="Maintain up-to-date contact information",
+                    status=ComplianceLevel.COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence="Contacts found in both PeeringDB and WHOIS",
+                    recommendation="",
+                    data_source="peeringdb,whois",
+                )
+            )
+        elif has_peeringdb or has_whois:
+            source = "PeeringDB" if has_peeringdb else "WHOIS"
+            missing = "WHOIS" if has_peeringdb else "PeeringDB"
+            findings.append(
+                ComplianceFinding(
+                    article="Action 3",
+                    requirement="Maintain up-to-date contact information",
+                    status=ComplianceLevel.PARTIAL,
+                    severity=Severity.MEDIUM,
+                    evidence=f"Contacts found in {source} but not {missing}",
+                    recommendation=f"Register contact information in {missing}",
+                    data_source=source.lower(),
+                )
+            )
+        else:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 3",
+                    requirement="Maintain up-to-date contact information",
+                    status=ComplianceLevel.NON_COMPLIANT,
+                    severity=Severity.MEDIUM,
+                    evidence="No contact information found in PeeringDB or WHOIS",
+                    recommendation="Register NOC/abuse contacts in PeeringDB and WHOIS/RIR database",
+                    data_source="peeringdb,whois",
+                )
+            )
+
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 3: Coordination",
+            articles=["Facilitate global operational communication"],
+            findings=findings,
+            score=score,
+            level=self._score_to_level(score * 100),
+        )
+
+    def _check_manrs_validation(
+        self,
+        rpki_coverage: float | None,
+        has_aspa: bool | None,
+    ) -> ComplianceCategoryReport:
+        findings: list[ComplianceFinding] = []
+
+        # ROA deployment
+        if rpki_coverage is not None:
+            if rpki_coverage >= 0.9:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="RPKI ROA deployment",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="",
+                        data_source="rpki_validation",
+                    )
+                )
+            elif rpki_coverage >= 0.7:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="RPKI ROA deployment",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.HIGH,
+                        evidence=f"ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="Increase ROA coverage to 90%+",
+                        data_source="rpki_validation",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="RPKI ROA deployment",
+                        status=ComplianceLevel.NON_COMPLIANT,
+                        severity=Severity.HIGH,
+                        evidence=f"Low ROA coverage: {rpki_coverage:.0%}",
+                        recommendation="Create RPKI ROAs for all announced prefixes",
+                        data_source="rpki_validation",
+                    )
+                )
+        else:
+            findings.append(
+                ComplianceFinding(
+                    article="Action 4",
+                    requirement="RPKI ROA deployment",
+                    status=ComplianceLevel.NOT_ASSESSED,
+                    severity=Severity.HIGH,
+                    evidence="No RPKI data available",
+                    recommendation="Run RPKI validation to assess ROA deployment",
+                    data_source="rpki_validation",
+                )
+            )
+
+        # ASPA deployment
+        if has_aspa is not None:
+            if has_aspa:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="ASPA deployment for path authorization",
+                        status=ComplianceLevel.COMPLIANT,
+                        severity=Severity.MEDIUM,
+                        evidence="ASPA object published",
+                        recommendation="",
+                        data_source="rpki_aspa",
+                    )
+                )
+            else:
+                findings.append(
+                    ComplianceFinding(
+                        article="Action 4",
+                        requirement="ASPA deployment for path authorization",
+                        status=ComplianceLevel.PARTIAL,
+                        severity=Severity.MEDIUM,
+                        evidence="No ASPA object published",
+                        recommendation="Publish ASPA object at your RIR portal",
+                        data_source="rpki_aspa",
+                    )
+                )
+
+        score = self._calculate_category_score(findings)
+        return ComplianceCategoryReport(
+            category="Action 4: Global Validation",
+            articles=["Facilitate validation of routing information on a global scale"],
             findings=findings,
             score=score,
             level=self._score_to_level(score * 100),

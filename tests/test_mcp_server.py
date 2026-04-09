@@ -1,6 +1,7 @@
 """Tests for MCP server input validation and output consistency."""
 
-from unittest.mock import AsyncMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -20,9 +21,7 @@ class TestGetRpkiStatus:
                 "status": "valid",
                 "prefix": "8.8.8.0/24",
                 "origin_asn": 15169,
-                "validating_roas": [
-                    {"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}
-                ],
+                "validating_roas": [{"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}],
             }
         )
 
@@ -107,35 +106,27 @@ class TestDateRangeValidation:
     @pytest.mark.asyncio
     async def test_mcp_routing_history_reversed_dates(self):
         """Test that reversed dates are rejected in mcp get_routing_history."""
-        result = await mcp_server.get_routing_history(
-            "8.8.8.0/24", "2026-02-06", "2026-02-01"
-        )
+        result = await mcp_server.get_routing_history("8.8.8.0/24", "2026-02-06", "2026-02-01")
         assert "after" in result.lower() or "invalid date range" in result.lower()
 
     @pytest.mark.asyncio
     async def test_mcp_bgp_path_history_reversed_dates(self):
         """Test that reversed dates are rejected in mcp get_bgp_path_history."""
-        result = await mcp_server.get_bgp_path_history(
-            "8.8.8.0/24", "2026-02-06", "2026-02-01"
-        )
+        result = await mcp_server.get_bgp_path_history("8.8.8.0/24", "2026-02-06", "2026-02-01")
         assert "after" in result.lower() or "invalid date range" in result.lower()
 
     @pytest.mark.asyncio
     async def test_tools_routing_history_reversed_dates(self):
         """Test that reversed dates are rejected in ai/tools get_routing_history."""
         tools = BGPTools(ripe_stat=AsyncMock(), bgp_radar=AsyncMock())
-        result = await tools.get_routing_history(
-            "8.8.8.0/24", "2026-02-06", "2026-02-01"
-        )
+        result = await tools.get_routing_history("8.8.8.0/24", "2026-02-06", "2026-02-01")
         assert "after" in result.lower() or "invalid date range" in result.lower()
 
     @pytest.mark.asyncio
     async def test_tools_bgp_path_history_reversed_dates(self):
         """Test that reversed dates are rejected in ai/tools get_bgp_path_history."""
         tools = BGPTools(ripe_stat=AsyncMock(), bgp_radar=AsyncMock())
-        result = await tools.get_bgp_path_history(
-            "8.8.8.0/24", "2026-02-06", "2026-02-01"
-        )
+        result = await tools.get_bgp_path_history("8.8.8.0/24", "2026-02-06", "2026-02-01")
         assert "after" in result.lower() or "invalid date range" in result.lower()
 
     @pytest.mark.asyncio
@@ -145,9 +136,7 @@ class TestDateRangeValidation:
         mock_client.get_routing_history = AsyncMock(return_value={"by_origin": []})
 
         with patch.object(mcp_server, "get_ripe_stat", return_value=mock_client):
-            result = await mcp_server.get_routing_history(
-                "8.8.8.0/24", "2026-02-01", "2026-02-06"
-            )
+            result = await mcp_server.get_routing_history("8.8.8.0/24", "2026-02-01", "2026-02-06")
 
         assert "invalid date range" not in result.lower()
 
@@ -196,7 +185,11 @@ class TestGlobalpingBogonDetection:
         with patch.object(mcp_server, "get_globalping", return_value=AsyncMock()):
             result = await mcp_server.ping_from_global("192.0.2.1")
 
-        assert "documentation" in result.lower() or "rfc" in result.lower() or "bogon" in result.lower()
+        assert (
+            "documentation" in result.lower()
+            or "rfc" in result.lower()
+            or "bogon" in result.lower()
+        )
         assert "cannot be probed" in result.lower() or "not routable" in result.lower()
 
     @pytest.mark.asyncio
@@ -205,7 +198,11 @@ class TestGlobalpingBogonDetection:
         with patch.object(mcp_server, "get_globalping", return_value=AsyncMock()):
             result = await mcp_server.traceroute_from_global("192.0.2.1")
 
-        assert "documentation" in result.lower() or "rfc" in result.lower() or "bogon" in result.lower()
+        assert (
+            "documentation" in result.lower()
+            or "rfc" in result.lower()
+            or "bogon" in result.lower()
+        )
         assert "cannot be probed" in result.lower() or "not routable" in result.lower()
 
     @pytest.mark.asyncio
@@ -214,7 +211,11 @@ class TestGlobalpingBogonDetection:
         with patch.object(mcp_server, "get_globalping", return_value=AsyncMock()):
             result = await mcp_server.ping_from_global("198.51.100.1")
 
-        assert "documentation" in result.lower() or "rfc" in result.lower() or "bogon" in result.lower()
+        assert (
+            "documentation" in result.lower()
+            or "rfc" in result.lower()
+            or "bogon" in result.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_ping_test_net3_returns_friendly_error(self):
@@ -222,7 +223,11 @@ class TestGlobalpingBogonDetection:
         with patch.object(mcp_server, "get_globalping", return_value=AsyncMock()):
             result = await mcp_server.ping_from_global("203.0.113.1")
 
-        assert "documentation" in result.lower() or "rfc" in result.lower() or "bogon" in result.lower()
+        assert (
+            "documentation" in result.lower()
+            or "rfc" in result.lower()
+            or "bogon" in result.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_ping_valid_target_not_rejected(self):
@@ -331,19 +336,25 @@ class TestCheckRpkiForAsnPerPrefix:
                     "status": "valid",
                     "prefix": "8.8.8.0/24",
                     "origin_asn": origin_asn,
-                    "validating_roas": [{"origin": str(origin_asn), "prefix": "8.8.8.0/24", "max_length": 24}],
+                    "validating_roas": [
+                        {"origin": str(origin_asn), "prefix": "8.8.8.0/24", "max_length": 24}
+                    ],
                 },
                 "8.8.4.0/24": {
                     "status": "valid",
                     "prefix": "8.8.4.0/24",
                     "origin_asn": origin_asn,
-                    "validating_roas": [{"origin": str(origin_asn), "prefix": "8.8.4.0/24", "max_length": 24}],
+                    "validating_roas": [
+                        {"origin": str(origin_asn), "prefix": "8.8.4.0/24", "max_length": 24}
+                    ],
                 },
                 "1.2.3.0/24": {
                     "status": "invalid",
                     "prefix": "1.2.3.0/24",
                     "origin_asn": origin_asn,
-                    "validating_roas": [{"origin": "99999", "prefix": "1.2.3.0/24", "max_length": 24}],
+                    "validating_roas": [
+                        {"origin": "99999", "prefix": "1.2.3.0/24", "max_length": 24}
+                    ],
                 },
                 "10.0.0.0/8": {
                     "status": "not-found",
@@ -608,9 +619,7 @@ class TestVerifyAspaPath:
             )
         )
 
-        with patch.object(
-            mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)
-        ):
+        with patch.object(mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)):
             result = await mcp_server.verify_aspa_path("13335,174,15169")
 
         assert "VALID" in result
@@ -622,9 +631,7 @@ class TestVerifyAspaPath:
     @pytest.mark.asyncio
     async def test_mcp_verify_aspa_path_no_monocle(self):
         """Test that missing monocle returns helpful error message."""
-        with patch.object(
-            mcp_server, "get_aspa_validator", AsyncMock(return_value=None)
-        ):
+        with patch.object(mcp_server, "get_aspa_validator", AsyncMock(return_value=None)):
             result = await mcp_server.verify_aspa_path("13335,174,15169")
 
         assert "Monocle" in result
@@ -648,9 +655,7 @@ class TestVerifyAspaPath:
             )
         )
 
-        with patch.object(
-            mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)
-        ):
+        with patch.object(mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)):
             result = await mcp_server.verify_aspa_path("abc,def")
 
         assert "Invalid AS path format" in result or "valid AS path" in result
@@ -706,10 +711,138 @@ class TestVerifyAspaPath:
 
         with (
             patch.object(mcp_server, "get_ripe_stat", return_value=mock_client),
-            patch.object(
-                mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)
-            ),
+            patch.object(mcp_server, "get_aspa_validator", AsyncMock(return_value=mock_validator)),
         ):
             result = await mcp_server.check_prefix_anomalies("8.8.8.0/24")
 
         assert "ASPA" in result
+
+
+class TestCheckMANRSReadiness:
+    """Tests for check_manrs MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_basic_assessment(self):
+        """Tool returns MANRS readiness assessment."""
+        mock_ripe = AsyncMock()
+        mock_ripe.get_announced_prefixes = AsyncMock(return_value=["1.0.0.0/24"])
+        mock_ripe.get_rpki_validation = AsyncMock(return_value="valid")
+        mock_ripe.get_bgp_state = AsyncMock(return_value=[])
+
+        mock_rpki = AsyncMock()
+        mock_rpki.has_aspa = AsyncMock(return_value=True)
+
+        mock_peeringdb = MagicMock()
+        mock_peeringdb.get_network_by_asn = MagicMock(
+            return_value={"poc_set": [{"email": "noc@example.com"}]}
+        )
+
+        with (
+            patch.object(mcp_server, "get_ripe_stat", return_value=mock_ripe),
+            patch.object(mcp_server, "get_rpki_console", return_value=mock_rpki),
+            patch.object(mcp_server, "get_peeringdb", return_value=mock_peeringdb),
+        ):
+            result = await mcp_server.check_manrs(asn=64496)
+
+        assert "MANRS" in result
+        assert "AS64496" in result
+        assert "Action 1" in result or "Filtering" in result
+
+    @pytest.mark.asyncio
+    async def test_json_output(self):
+        """Tool returns valid JSON when requested."""
+        mock_ripe = AsyncMock()
+        mock_ripe.get_announced_prefixes = AsyncMock(return_value=[])
+
+        mock_rpki = AsyncMock()
+        mock_rpki.has_aspa = AsyncMock(return_value=False)
+
+        with (
+            patch.object(mcp_server, "get_ripe_stat", return_value=mock_ripe),
+            patch.object(mcp_server, "get_rpki_console", return_value=mock_rpki),
+            patch.object(mcp_server, "get_peeringdb", return_value=None),
+        ):
+            result = await mcp_server.check_manrs(asn=64496, output_format="json")
+
+        data = json.loads(result)
+        assert data["asn"] == 64496
+        assert "overall_readiness" in data
+        assert "action_findings" in data
+
+
+class TestGetMANRSStatus:
+    """Tests for get_manrs_info MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_no_api_key(self):
+        """Tool returns helpful message when no API key configured."""
+        with patch.object(mcp_server, "get_manrs_client", return_value=None):
+            result = await mcp_server.get_manrs_info(asn=13335)
+
+        assert "MANRS_API_KEY" in result
+        assert "check_manrs" in result
+
+    @pytest.mark.asyncio
+    async def test_participant_found(self):
+        """Tool returns conformance data for a MANRS participant."""
+        from bgp_explorer.models.manrs import MANRSConformance, MANRSReadiness
+
+        mock_client = AsyncMock()
+        mock_client.get_asn_conformance = AsyncMock(
+            return_value=MANRSConformance(
+                asn=13335,
+                name="Cloudflare, Inc.",
+                country="US",
+                status="ready",
+                action1_filtering=MANRSReadiness.READY,
+                action2_anti_spoofing=MANRSReadiness.READY,
+                action3_coordination=MANRSReadiness.READY,
+                action4_validation=MANRSReadiness.READY,
+                last_updated="2026-04-01",
+                manrs_participant=True,
+            )
+        )
+
+        with patch.object(mcp_server, "get_manrs_client", return_value=mock_client):
+            result = await mcp_server.get_manrs_info(asn=13335)
+
+        assert "AS13335" in result
+        assert "Cloudflare" in result
+        assert "READY" in result.upper()
+
+    @pytest.mark.asyncio
+    async def test_not_found(self):
+        """Tool returns appropriate message for non-participant."""
+        mock_client = AsyncMock()
+        mock_client.get_asn_conformance = AsyncMock(return_value=None)
+
+        with patch.object(mcp_server, "get_manrs_client", return_value=mock_client):
+            result = await mcp_server.get_manrs_info(asn=99999)
+
+        assert "not found" in result.lower() or "not a MANRS" in result
+
+
+class TestComplianceAuditMANRS:
+    """Tests for MANRS support in run_compliance_audit."""
+
+    @pytest.mark.asyncio
+    async def test_manrs_framework(self):
+        """run_compliance_audit accepts framework='manrs'."""
+        mock_ripe = AsyncMock()
+        mock_ripe.get_announced_prefixes = AsyncMock(return_value=["1.0.0.0/24"])
+        mock_ripe.get_rpki_validation = AsyncMock(return_value="valid")
+        mock_ripe.get_bgp_state = AsyncMock(return_value=[])
+        mock_ripe.get_whois = AsyncMock(return_value={})
+
+        mock_rpki = AsyncMock()
+        mock_rpki.has_aspa = AsyncMock(return_value=False)
+
+        with (
+            patch.object(mcp_server, "get_ripe_stat", return_value=mock_ripe),
+            patch.object(mcp_server, "get_rpki_console", return_value=mock_rpki),
+            patch.object(mcp_server, "get_peeringdb", return_value=None),
+        ):
+            result = await mcp_server.run_compliance_audit(asn=64496, framework="manrs")
+
+        assert "MANRS" in result
+        assert "AS64496" in result

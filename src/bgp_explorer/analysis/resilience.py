@@ -106,9 +106,7 @@ class ResilienceAssessor:
         if upstream_count == 0:
             # Tier 1 / transit-free networks have no upstreams by definition
             if peer_count >= 100 and downstream_count >= 100:
-                issues.append(
-                    "Transit-free network (Tier 1) - no upstream providers needed"
-                )
+                issues.append("Transit-free network (Tier 1) - no upstream providers needed")
                 return 1.0, issues
             issues.append(
                 "No transit providers detected - network may be Tier 1 or data incomplete"

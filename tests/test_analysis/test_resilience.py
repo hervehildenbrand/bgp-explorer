@@ -185,7 +185,6 @@ class TestResilienceAssessor:
         final_score = assessor._calculate_final_score(scores, flags)
         assert final_score > 8.0
 
-
     def test_score_transit_tier1_network(self, assessor):
         """Test that Tier 1 / transit-free networks score 1.0 with 0 upstreams."""
         upstreams: list[ASRelationship] = []

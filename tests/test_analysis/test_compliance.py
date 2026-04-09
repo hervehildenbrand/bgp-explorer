@@ -183,24 +183,18 @@ class TestDORACompliance:
 
     def test_single_transit_critical_finding(self, auditor):
         """Single transit provider triggers CRITICAL finding under DORA Art. 5-16."""
-        resilience = make_resilience_report(
-            upstream_count=1, single_transit=True, score=3.0
-        )
+        resilience = make_resilience_report(upstream_count=1, single_transit=True, score=3.0)
         report = auditor.audit_dora(asn=64496, resilience_report=resilience)
         assert report.framework == ComplianceFramework.DORA
         # Must have a CRITICAL finding about transit concentration
-        critical = [
-            f for f in report.critical_findings if f.severity == Severity.CRITICAL
-        ]
+        critical = [f for f in report.critical_findings if f.severity == Severity.CRITICAL]
         assert len(critical) >= 1
         assert any("transit" in f.evidence.lower() for f in critical)
         assert report.overall_level != ComplianceLevel.COMPLIANT
 
     def test_good_resilience_compliant(self, auditor):
         """Good resilience scores lead to COMPLIANT status."""
-        resilience = make_resilience_report(
-            score=8.5, upstream_count=4, peer_count=80, ixp_count=5
-        )
+        resilience = make_resilience_report(score=8.5, upstream_count=4, peer_count=80, ixp_count=5)
         stability = make_stability_report(is_stable=True)
         rov = make_rov_report(protection_level="high", path_coverage=0.9)
         report = auditor.audit_dora(
@@ -221,17 +215,14 @@ class TestDORACompliance:
             f
             for cat in report.categories
             for f in cat.findings
-            if f.severity == Severity.HIGH
-            and f.status == ComplianceLevel.NON_COMPLIANT
+            if f.severity == Severity.HIGH and f.status == ComplianceLevel.NON_COMPLIANT
         ]
         assert len(high_findings) >= 1
 
     def test_low_roa_deployment_high_finding(self, auditor):
         """Low ROA coverage (ASN's own deployment) triggers HIGH finding."""
         resilience = make_resilience_report()
-        report = auditor.audit_dora(
-            asn=64496, resilience_report=resilience, rpki_coverage=0.3
-        )
+        report = auditor.audit_dora(asn=64496, resilience_report=resilience, rpki_coverage=0.3)
         roa_findings = [
             f
             for cat in report.categories
@@ -250,10 +241,7 @@ class TestDORACompliance:
         )
         # ROA deployment should be COMPLIANT
         roa_findings = [
-            f
-            for cat in report.categories
-            for f in cat.findings
-            if "roa" in f.requirement.lower()
+            f for cat in report.categories for f in cat.findings if "roa" in f.requirement.lower()
         ]
         assert any(f.status == ComplianceLevel.COMPLIANT for f in roa_findings)
         # ROV enforcement should be INFO (ecosystem issue, no penalty)
@@ -270,9 +258,7 @@ class TestDORACompliance:
         """Low RPKI/ROV protection triggers HIGH finding when no rpki_coverage provided."""
         resilience = make_resilience_report()
         rov = make_rov_report(protection_level="low", path_coverage=0.1)
-        report = auditor.audit_dora(
-            asn=64496, resilience_report=resilience, rov_report=rov
-        )
+        report = auditor.audit_dora(asn=64496, resilience_report=resilience, rov_report=rov)
         rpki_findings = [
             f
             for cat in report.categories
@@ -293,8 +279,7 @@ class TestDORACompliance:
             f
             for cat in report.categories
             for f in cat.findings
-            if f.severity == Severity.MEDIUM
-            and "flap" in f.evidence.lower()
+            if f.severity == Severity.MEDIUM and "flap" in f.evidence.lower()
         ]
         assert len(flap_findings) >= 1
 
@@ -302,9 +287,7 @@ class TestDORACompliance:
         """Less than 2 upstreams triggers CRITICAL third-party risk."""
         resilience = make_resilience_report(upstream_count=1, single_transit=True, score=3.0)
         report = auditor.audit_dora(asn=64496, resilience_report=resilience)
-        third_party_cats = [
-            c for c in report.categories if "third" in c.category.lower()
-        ]
+        third_party_cats = [c for c in report.categories if "third" in c.category.lower()]
         assert len(third_party_cats) >= 1
         critical = [f for f in third_party_cats[0].findings if f.severity == Severity.CRITICAL]
         assert len(critical) >= 1
@@ -312,28 +295,33 @@ class TestDORACompliance:
     def test_ddos_provider_as_only_diversity_critical(self, auditor):
         """DDoS provider as only second upstream = effective single transit."""
         resilience = make_resilience_report(
-            upstream_count=2, single_transit=False, score=5.0,
+            upstream_count=2,
+            single_transit=False,
+            score=5.0,
             ddos_provider_detected="Radware",
         )
         report = auditor.audit_dora(asn=64496, resilience_report=resilience)
         # Should trigger CRITICAL transit concentration (effective single transit)
-        critical = [
-            f for f in report.critical_findings if f.severity == Severity.CRITICAL
-        ]
+        critical = [f for f in report.critical_findings if f.severity == Severity.CRITICAL]
         assert len(critical) >= 1
-        assert any("transit" in f.evidence.lower() or "ddos" in f.evidence.lower() for f in critical)
+        assert any(
+            "transit" in f.evidence.lower() or "ddos" in f.evidence.lower() for f in critical
+        )
         assert report.overall_level != ComplianceLevel.COMPLIANT
 
     def test_ddos_provider_with_multiple_real_upstreams_ok(self, auditor):
         """DDoS provider with 3+ upstreams = still diverse enough."""
         resilience = make_resilience_report(
-            upstream_count=3, single_transit=False, score=7.0,
+            upstream_count=3,
+            single_transit=False,
+            score=7.0,
             ddos_provider_detected="Cloudflare",
         )
         report = auditor.audit_dora(asn=64496, resilience_report=resilience)
         # Should NOT trigger CRITICAL transit concentration
         critical_transit = [
-            f for f in report.critical_findings
+            f
+            for f in report.critical_findings
             if f.severity == Severity.CRITICAL and "transit" in f.requirement.lower()
         ]
         assert len(critical_transit) == 0
@@ -343,22 +331,15 @@ class TestDORACompliance:
         resilience = make_resilience_report(peer_count=10)
         report = auditor.audit_dora(asn=64496, resilience_report=resilience)
         peer_findings = [
-            f
-            for cat in report.categories
-            for f in cat.findings
-            if "peer" in f.requirement.lower()
+            f for cat in report.categories for f in cat.findings if "peer" in f.requirement.lower()
         ]
         assert len(peer_findings) >= 1
 
     def test_no_stability_data_high_incident_finding(self, auditor):
         """Missing stability data triggers HIGH incident management finding."""
         resilience = make_resilience_report()
-        report = auditor.audit_dora(
-            asn=64496, resilience_report=resilience, stability_report=None
-        )
-        incident_cats = [
-            c for c in report.categories if "incident" in c.category.lower()
-        ]
+        report = auditor.audit_dora(asn=64496, resilience_report=resilience, stability_report=None)
+        incident_cats = [c for c in report.categories if "incident" in c.category.lower()]
         assert len(incident_cats) >= 1
         high = [f for f in incident_cats[0].findings if f.severity == Severity.HIGH]
         assert len(high) >= 1
@@ -376,9 +357,7 @@ class TestNIS2Compliance:
         """Low ROV coverage triggers supply chain finding under NIS 2."""
         resilience = make_resilience_report()
         rov = make_rov_report(protection_level="low", path_coverage=0.1)
-        report = auditor.audit_nis2(
-            asn=64496, resilience_report=resilience, rov_report=rov
-        )
+        report = auditor.audit_nis2(asn=64496, resilience_report=resilience, rov_report=rov)
         assert report.framework == ComplianceFramework.NIS2
         supply_chain_findings = [
             f
@@ -393,7 +372,9 @@ class TestNIS2Compliance:
     def test_ddos_provider_effective_single_transit_continuity(self, auditor):
         """DDoS provider as only second upstream triggers business continuity finding."""
         resilience = make_resilience_report(
-            upstream_count=2, ixp_count=3, single_transit=False,
+            upstream_count=2,
+            ixp_count=3,
+            single_transit=False,
             ddos_provider_detected="Radware",
         )
         report = auditor.audit_nis2(asn=64496, resilience_report=resilience)
@@ -401,31 +382,29 @@ class TestNIS2Compliance:
             f
             for cat in report.categories
             for f in cat.findings
-            if "continuity" in f.requirement.lower()
-            or "business" in f.requirement.lower()
+            if "continuity" in f.requirement.lower() or "business" in f.requirement.lower()
         ]
         assert len(continuity_findings) >= 1
         assert any(f.severity == Severity.HIGH for f in continuity_findings)
 
     def test_business_continuity_check(self, auditor):
         """Insufficient upstreams or IXPs triggers business continuity finding."""
-        resilience = make_resilience_report(upstream_count=1, ixp_count=1, single_transit=True, score=3.0)
+        resilience = make_resilience_report(
+            upstream_count=1, ixp_count=1, single_transit=True, score=3.0
+        )
         report = auditor.audit_nis2(asn=64496, resilience_report=resilience)
         continuity_findings = [
             f
             for cat in report.categories
             for f in cat.findings
-            if "continuity" in f.requirement.lower()
-            or "business" in f.requirement.lower()
+            if "continuity" in f.requirement.lower() or "business" in f.requirement.lower()
         ]
         assert len(continuity_findings) >= 1
         assert any(f.severity == Severity.HIGH for f in continuity_findings)
 
     def test_good_network_compliant(self, auditor):
         """Good network scores lead to COMPLIANT NIS 2 status."""
-        resilience = make_resilience_report(
-            score=8.5, upstream_count=4, peer_count=80, ixp_count=5
-        )
+        resilience = make_resilience_report(score=8.5, upstream_count=4, peer_count=80, ixp_count=5)
         stability = make_stability_report(is_stable=True)
         rov = make_rov_report(protection_level="high", path_coverage=0.9)
         report = auditor.audit_nis2(
@@ -441,12 +420,8 @@ class TestNIS2Compliance:
     def test_no_stability_incident_detection_finding(self, auditor):
         """Missing stability data triggers incident detection finding."""
         resilience = make_resilience_report()
-        report = auditor.audit_nis2(
-            asn=64496, resilience_report=resilience, stability_report=None
-        )
-        incident_cats = [
-            c for c in report.categories if "incident" in c.category.lower()
-        ]
+        report = auditor.audit_nis2(asn=64496, resilience_report=resilience, stability_report=None)
+        incident_cats = [c for c in report.categories if "incident" in c.category.lower()]
         assert len(incident_cats) >= 1
         high = [f for f in incident_cats[0].findings if f.severity == Severity.HIGH]
         assert len(high) >= 1
@@ -543,9 +518,7 @@ class TestAuditBoth:
     def test_audit_both_returns_two_reports(self, auditor):
         """audit_both returns a tuple of DORA and NIS2 reports."""
         resilience = make_resilience_report()
-        dora_report, nis2_report = auditor.audit_both(
-            asn=64496, resilience_report=resilience
-        )
+        dora_report, nis2_report = auditor.audit_both(asn=64496, resilience_report=resilience)
         assert dora_report.framework == ComplianceFramework.DORA
         assert nis2_report.framework == ComplianceFramework.NIS2
 
@@ -560,9 +533,7 @@ class TestFormatReport:
 
     def test_format_report_contains_key_elements(self, auditor):
         """Formatted report contains essential sections."""
-        resilience = make_resilience_report(
-            upstream_count=1, single_transit=True, score=3.0
-        )
+        resilience = make_resilience_report(upstream_count=1, single_transit=True, score=3.0)
         report = auditor.audit_dora(asn=64496, resilience_report=resilience)
         text = auditor.format_report(report)
         assert "AS64496" in text
@@ -573,9 +544,7 @@ class TestFormatReport:
 
     def test_format_report_compliant(self, auditor):
         """Compliant report shows positive status."""
-        resilience = make_resilience_report(
-            score=8.5, upstream_count=4, peer_count=80, ixp_count=5
-        )
+        resilience = make_resilience_report(score=8.5, upstream_count=4, peer_count=80, ixp_count=5)
         stability = make_stability_report(is_stable=True)
         rov = make_rov_report(protection_level="high", path_coverage=0.9)
         report = auditor.audit_dora(
@@ -600,9 +569,7 @@ class TestMissingOptionalData:
     def test_missing_stability_not_assessed(self, auditor):
         """Missing stability data produces NOT_ASSESSED findings in relevant checks."""
         resilience = make_resilience_report()
-        report = auditor.audit_dora(
-            asn=64496, resilience_report=resilience, stability_report=None
-        )
+        report = auditor.audit_dora(asn=64496, resilience_report=resilience, stability_report=None)
         # Should still produce a report
         assert report.overall_score is not None
         # Stability-dependent checks produce findings (either NOT_ASSESSED or HIGH)
@@ -619,8 +586,7 @@ class TestMissingOptionalData:
             f
             for cat in report.categories
             for f in cat.findings
-            if "roa" in f.requirement.lower()
-            and f.status == ComplianceLevel.NOT_ASSESSED
+            if "roa" in f.requirement.lower() and f.status == ComplianceLevel.NOT_ASSESSED
         ]
         assert len(roa_findings) >= 1
 
@@ -631,3 +597,70 @@ class TestMissingOptionalData:
         assert report.asn == 64496
         assert isinstance(report.overall_score, float)
         assert report.overall_level in ComplianceLevel
+
+
+# --- MANRS Compliance Tests ---
+
+
+class TestMANRSCompliance:
+    @pytest.fixture
+    def auditor(self):
+        return ComplianceAuditor()
+
+    def test_manrs_framework_enum(self):
+        """MANRS is a valid compliance framework."""
+        assert ComplianceFramework.MANRS.value == "MANRS"
+
+    def test_manrs_audit_returns_report(self, auditor):
+        """audit_manrs returns a ComplianceAuditReport."""
+        report = auditor.audit_manrs(asn=64496)
+        assert isinstance(report, ComplianceAuditReport)
+        assert report.framework == ComplianceFramework.MANRS
+        assert report.asn == 64496
+
+    def test_manrs_three_categories(self, auditor):
+        """MANRS audit has 3 categories (Action 2 Anti-Spoofing excluded — unmeasurable)."""
+        report = auditor.audit_manrs(asn=64496)
+        assert len(report.categories) == 3
+        cat_names = [c.category for c in report.categories]
+        assert any("Filtering" in c for c in cat_names)
+        assert not any("Anti-Spoofing" in c or "Spoofing" in c for c in cat_names)
+        assert any("Coordination" in c for c in cat_names)
+        assert any("Validation" in c for c in cat_names)
+
+    def test_manrs_good_network_compliant(self, auditor):
+        """Good RPKI + contacts = high MANRS score."""
+        rov = make_rov_report(protection_level="high", path_coverage=0.9)
+        report = auditor.audit_manrs(
+            asn=64496,
+            rpki_coverage=0.95,
+            has_aspa=True,
+            rov_report=rov,
+            contacts={"noc_email": "noc@example.com", "abuse_email": "abuse@example.com"},
+            whois_data={"abuse_contacts": ["abuse@example.com"]},
+        )
+        assert report.overall_score >= 70
+
+    def test_manrs_poor_network_low_score(self, auditor):
+        """Low RPKI + no contacts = lower MANRS score."""
+        # When we explicitly provide poor data (not missing data), we get a lower score
+        report = auditor.audit_manrs(asn=64496, rpki_coverage=0.2, has_aspa=False)
+        # Low ROA coverage triggers NON_COMPLIANT (HIGH severity = -25)
+        # No contacts triggers NON_COMPLIANT (MEDIUM severity = -15)
+        # No ASPA triggers PARTIAL (MEDIUM severity = -15)
+        assert report.overall_score <= 80
+
+    def test_manrs_format_report(self, auditor):
+        """Formatted MANRS report contains key elements."""
+        report = auditor.audit_manrs(asn=64496, rpki_coverage=0.5)
+        text = auditor.format_report(report)
+        assert "MANRS" in text
+        assert "AS64496" in text
+
+    def test_audit_all_returns_three_reports(self, auditor):
+        """audit_all returns DORA, NIS2, and MANRS reports."""
+        resilience = make_resilience_report()
+        dora, nis2, manrs = auditor.audit_all(asn=64496, resilience_report=resilience)
+        assert dora.framework == ComplianceFramework.DORA
+        assert nis2.framework == ComplianceFramework.NIS2
+        assert manrs.framework == ComplianceFramework.MANRS

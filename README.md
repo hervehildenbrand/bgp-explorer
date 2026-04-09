@@ -38,7 +38,7 @@ git clone https://github.com/hervehildenbrand/bgp-explorer.git
 cd bgp-explorer
 uv sync
 uv run bgp-explorer install-deps  # Auto-installs Go + Rust + binaries
-uv run bgp-explorer chat          # All 24 tools ready!
+uv run bgp-explorer chat          # All 8 investigation tools ready!
 ```
 
 ## Use with Claude Code (No API Key Needed)
@@ -74,7 +74,7 @@ claude mcp remove bgp-explorer 2>/dev/null
 claude mcp add bgp-explorer -- bgp-explorer mcp
 ```
 
-**How it works:** The MCP server exposes 23 BGP investigation tools. All AI processing uses your Claude Code subscription - no separate API costs.
+**How it works:** The MCP server exposes 8 composite BGP investigation tools. Each returns a summary by default, with a `sections` parameter for detail. All AI processing uses your Claude Code subscription - no separate API costs.
 
 See [Claude Code Integration](https://github.com/hervehildenbrand/bgp-explorer/wiki/Claude-Code-Integration) in the wiki for details.
 
@@ -93,7 +93,7 @@ The `install-deps` command automatically installs:
 - **Go** (if missing) - Downloads and extracts to `~/.local/go`
 - **bgp-radar** (optional) - Real-time BGP anomaly detection (`go install`)
 
-**Note:** The app works without bgp-radar installed. Real-time monitoring (`/monitor start`, `get_anomalies` tool) requires bgp-radar. On-demand hijack detection (`check_prefix_anomalies` tool) works without it.
+**Note:** The app works without bgp-radar installed. Real-time monitoring (`/monitor start`) requires bgp-radar. On-demand hijack detection (`investigate_prefix` with anomalies section) works without it.
 
 Binaries are auto-detected in `~/go/bin` and `~/.cargo/bin`.
 
@@ -132,7 +132,33 @@ ANTHROPIC_API_KEY=your_anthropic_key_here
 
 # Optional: bgp-radar path (defaults to PATH lookup)
 BGP_RADAR_PATH=/path/to/bgp-radar
+
+# Optional: MANRS Observatory API key (for official conformance data)
+# Register free at https://manrs.org/resources/api/
+MANRS_API_KEY=your_manrs_api_key_here
 ```
+
+### Claude Desktop MCP Setup
+
+When using bgp-explorer as an MCP server in Claude Desktop, API keys must be added
+to the Claude Desktop config (`.env` is not read by the MCP process):
+
+```json
+// ~/Library/Application Support/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "bgp-explorer": {
+      "command": "/path/to/bgp-explorer/.venv/bin/bgp-explorer",
+      "args": ["mcp"],
+      "env": {
+        "MANRS_API_KEY": "your-manrs-api-key-here"
+      }
+    }
+  }
+}
+```
+
+> **Note:** Restart Claude Desktop after changing this file.
 
 ## Usage
 
@@ -215,28 +241,31 @@ Options:
 > Should we peer with AS64496?
 ```
 
-## Available Tools (24 total)
+## Available Tools (8 composite tools)
 
-| Tool | Description |
-|------|-------------|
-| `lookup_prefix` | Get origin ASN, AS paths, and visibility for a prefix |
-| `get_asn_announcements` | List all prefixes announced by an ASN |
-| `get_asn_details` | Detailed ASN analysis with upstream/downstream relationships |
-| `get_routing_history` | Historical routing data for a resource |
-| `analyze_as_path` | Path diversity, upstream providers, transit ASNs, prepending detection |
-| `compare_collectors` | Compare routing views across collectors, detect inconsistencies |
-| `get_rpki_status` | RPKI validation (valid/invalid/not-found) |
-| `check_prefix_anomalies` | On-demand hijack detection (MOAS, RPKI, origin changes, visibility) |
-| `get_anomalies` | Real-time BGP anomalies from bgp-radar |
-| `ping_from_global` | Ping from worldwide vantage points |
-| `traceroute_from_global` | Traceroute from multiple locations |
-| `get_as_relationships` | Get all relationships for an AS (peers, upstreams, downstreams) |
-| `get_as_connectivity` | Get connectivity summary for an AS |
-| `check_as_relationship` | Check relationship between two specific ASes |
-| `get_network_contacts` | Get NOC/abuse contacts from PeeringDB |
-| `search_asn` | Search for ASN by name or description |
-| `get_ixp_presence` | Get IXP presence for an ASN |
-| `assess_network_resilience` | Score network resilience (1-10) with transit, peering, IXP analysis |
+Each tool returns a **summary by default**. Use the `sections` parameter to expand specific areas.
+
+| Tool | Purpose | Sections |
+|------|---------|----------|
+| `search_asn` | Find ASNs by organization name | — |
+| `investigate_asn` | Everything about an ASN | summary, connectivity, announcements, contacts, resilience, whois |
+| `investigate_prefix` | Everything about a prefix | summary, routing, anomalies, paths, collectors, looking_glass |
+| `check_rpki` | RPKI/ROA/ASPA analysis | summary, roa_coverage, roa_guidance, aspa_status, aspa_guidance, rov_coverage (+ AS path validation mode) |
+| `get_routing_history_v2` | Historical routing and stability | summary, origins, paths, stability, updates |
+| `investigate_ixp` | IXP presence or details | Auto-detects: ASN → presence, IXP name → details + members |
+| `probe_network` | Ping/traceroute from global probes | type: ping (default) or traceroute |
+| `run_audit` | DORA/NIS2/MANRS compliance | framework: dora, nis2, manrs, or all (default) |
+
+### MANRS Audit Details
+
+The `run_audit(framework='manrs')` assesses 3 of the 4 MANRS Actions:
+
+| Action | What we measure | Operator must verify |
+|--------|----------------|---------------------|
+| **Action 1: Filtering** | Indirect proxy: ROA coverage + ROV enforcer paths | Enable ROV on eBGP sessions, apply IRR prefix filters, set max-prefix limits |
+| **Action 2: Anti-Spoofing** | *Excluded — cannot be verified externally* | Deploy uRPF/BCP38 on customer-facing interfaces, self-test via [CAIDA Spoofer](https://spoofer.caida.org/) |
+| **Action 3: Coordination** | PeeringDB NOC contacts + WHOIS abuse contact | Ensure contacts are monitored and responsive |
+| **Action 4: Validation** | ROA coverage % + ASPA object published | Create missing ROAs at RIR portal, publish ASPA object |
 
 ## Commands
 
@@ -265,22 +294,25 @@ User → CLI (cli.py) → Agent (agent.py) → AI Backend (claude)
                                               ↓
                                         Tools (ai/tools.py)
                                               ↓
-                    ┌─────────────┬───────────┴───────────┬─────────────┐
-                    ↓             ↓                       ↓             ↓
-              bgp-radar      RIPE Stat              Globalping    BGPStream
-            [real-time]    [state/history]          [probing]    [archives]
+              ┌──────────┬──────────┬─────────┴────────┬──────────┬──────────┐
+              ↓          ↓          ↓                  ↓          ↓          ↓
+        bgp-radar    RIPE Stat   rpki-client       Globalping  Monocle   CAIDA
+        [realtime]  [state/hist] [ASPA+ROA]        [probing]   [AS rel]  [AS rel]
 ```
 
 ## Data Sources
 
-| Source | Type | Data Provided |
-|--------|------|---------------|
-| **RIPE Stat** | REST API | Current BGP state, routing history, RPKI validation |
-| **bgp-radar** | Subprocess | Real-time anomaly detection (hijacks, leaks, blackholes) |
-| **Globalping** | REST API | Global ping, traceroute, MTR, DNS measurements |
-| **PeeringDB** | CAIDA dump | Network info, IXP presence, NOC contacts |
-| **Monocle** | CLI | AS relationships (peers, upstreams, downstreams) from BGP data |
-| **BGPStream** | Library | Historical BGP data from RouteViews and RIPE RIS |
+| Source | Type | Data Provided | Auth |
+|--------|------|---------------|------|
+| **RIPE Stat** | REST API | Current BGP state, routing history, RPKI validation | Free, no key |
+| **rpki-client console** | REST API | Validated ROA (~825K) + ASPA (~1,472) objects from global RPKI | Free, no key |
+| **CAIDA Relationships** | HTTP | Inferred AS relationships (provider-customer, peering) | Free, no key |
+| **bgp-radar** | Subprocess | Real-time anomaly detection (hijacks, leaks, blackholes) | Local binary |
+| **Globalping** | REST API | Global ping, traceroute, MTR, DNS measurements | Free tier |
+| **PeeringDB** | CAIDA dump | Network info, IXP presence, NOC contacts | Free, no key |
+| **Monocle** | CLI | AS relationships (peers, upstreams, downstreams) from BGP data | Local binary |
+| **MANRS Observatory** | REST API | Official MANRS conformance scores per ASN | Free, key required |
+| **BGPStream** | Library | Historical BGP data from RouteViews and RIPE RIS | Free, no key |
 
 ## Development
 
@@ -311,21 +343,29 @@ src/bgp_explorer/
 ├── output.py        # Output formatting
 ├── models/          # Data models (BGPRoute, BGPEvent)
 ├── cache/           # TTL cache implementation
+├── mcp_server.py    # MCP server (8 composite tools)
 ├── sources/         # Data source clients
-│   ├── ripe_stat.py   # RIPE Stat REST API
-│   ├── bgp_radar.py   # bgp-radar subprocess
-│   ├── globalping.py  # Globalping REST API
-│   └── bgpstream.py   # BGPStream wrapper
-├── data/            # Static data
-│   └── ddos_providers.py # Known DDoS provider ASNs
+│   ├── ripe_stat.py      # RIPE Stat REST API
+│   ├── bgp_radar.py      # bgp-radar subprocess
+│   ├── globalping.py     # Globalping REST API
+│   ├── rpki_console.py   # rpki-client console (ROA + ASPA)
+│   ├── manrs.py          # MANRS Observatory API
+│   ├── monocle.py        # Monocle CLI wrapper
+│   ├── peeringdb.py      # PeeringDB network data
+│   └── bgpstream.py      # BGPStream wrapper
 ├── analysis/        # Analysis utilities
-│   ├── path_analysis.py  # AS path analysis
-│   ├── as_analysis.py    # ASN relationship analysis
-│   └── resilience.py     # Network resilience assessment
+│   ├── path_analysis.py       # AS path analysis
+│   ├── as_analysis.py         # ASN relationship analysis
+│   ├── resilience.py          # Network resilience assessment
+│   ├── aspa_validation.py     # ASPA path validation
+│   ├── rov_coverage.py        # ROV coverage analysis
+│   ├── compliance.py          # DORA/NIS2/MANRS compliance auditing
+│   ├── manrs_conformance.py   # MANRS readiness assessment
+│   └── stability.py           # Route stability analysis
 └── ai/              # AI backends
     ├── base.py      # Abstract base class
     ├── claude.py    # Claude implementation
-    └── tools.py     # Tool definitions
+    └── tools.py     # Tool definitions (standalone CLI)
 ```
 
 ## License

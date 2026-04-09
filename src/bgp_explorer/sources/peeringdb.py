@@ -51,7 +51,7 @@ class PeeringDBClient(DataSource):
             console: Rich console for progress output. Creates one if not provided.
         """
         self._cache_dir = cache_dir or DEFAULT_CACHE_DIR
-        self._console = console or Console()
+        self._console = console or Console(stderr=True)
         self._session: aiohttp.ClientSession | None = None
         self._loaded = False
 

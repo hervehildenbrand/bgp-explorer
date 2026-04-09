@@ -163,9 +163,7 @@ class TestBGPTools:
             "status": "valid",
             "prefix": "8.8.8.0/24",
             "origin_asn": 15169,
-            "validating_roas": [
-                {"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}
-            ],
+            "validating_roas": [{"origin": "15169", "prefix": "8.8.8.0/24", "max_length": 24}],
         }
 
         result = await tools.get_rpki_status("8.8.8.0/24", 15169)
@@ -181,9 +179,7 @@ class TestBGPTools:
             "status": "valid",
             "prefix": "192.0.2.0/21",
             "origin_asn": 64496,
-            "validating_roas": [
-                {"origin": "64496", "prefix": "192.0.2.0/21", "max_length": 24}
-            ],
+            "validating_roas": [{"origin": "64496", "prefix": "192.0.2.0/21", "max_length": 24}],
         }
 
         result = await tools.get_rpki_status("192.0.2.0/21", 64496)
@@ -193,9 +189,7 @@ class TestBGPTools:
     @pytest.mark.asyncio
     async def test_check_rpki_for_asn_per_prefix(self, tools, mock_ripe_stat):
         """Test check_rpki_for_asn shows per-prefix breakdown."""
-        mock_ripe_stat.get_announced_prefixes.return_value = [
-            "8.8.8.0/24", "10.0.0.0/8"
-        ]
+        mock_ripe_stat.get_announced_prefixes.return_value = ["8.8.8.0/24", "10.0.0.0/8"]
 
         async def mock_detail(prefix, asn):
             if prefix == "8.8.8.0/24":
@@ -203,7 +197,9 @@ class TestBGPTools:
                     "status": "valid",
                     "prefix": "8.8.8.0/24",
                     "origin_asn": asn,
-                    "validating_roas": [{"origin": str(asn), "prefix": "8.8.8.0/24", "max_length": 24}],
+                    "validating_roas": [
+                        {"origin": str(asn), "prefix": "8.8.8.0/24", "max_length": 24}
+                    ],
                 }
             return {
                 "status": "not-found",
@@ -244,9 +240,7 @@ class TestBGPTools:
     async def test_get_whois_data_prefix_with_irr(self, tools, mock_ripe_stat):
         """Test WHOIS data for prefix with IRR records."""
         mock_ripe_stat.get_whois_data.return_value = {
-            "records": [
-                [{"key": "inetnum", "value": "193.0.0.0 - 193.0.7.255"}]
-            ],
+            "records": [[{"key": "inetnum", "value": "193.0.0.0 - 193.0.7.255"}]],
             "irr_records": [
                 [
                     {"key": "route", "value": "193.0.0.0/21"},
@@ -1304,3 +1298,80 @@ class TestVerifyAspaPath:
 
         assert "ASPA" in result
         assert "paths checked" in result.lower() or "path" in result.lower()
+
+
+class TestCheckManrs:
+    """Tests for check_manrs tool in standalone mode."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        mock = AsyncMock()
+        mock.get_announced_prefixes = AsyncMock(return_value=["8.8.8.0/24"])
+        mock.get_rpki_validation = AsyncMock(return_value="valid")
+        mock.get_bgp_state = AsyncMock(return_value=[])
+        return mock
+
+    @pytest.fixture
+    def tools(self, mock_ripe_stat):
+        peeringdb = AsyncMock()
+        peeringdb.get_network_by_asn = MagicMock(return_value=None)
+        return BGPTools(
+            ripe_stat=mock_ripe_stat,
+            bgp_radar=AsyncMock(),
+            peeringdb=peeringdb,
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_manrs_returns_assessment(self, tools):
+        """check_manrs should return MANRS readiness assessment."""
+        result = await tools.check_manrs(15169)
+        assert "MANRS" in result
+        assert "Action 1" in result or "Filtering" in result
+
+    @pytest.mark.asyncio
+    async def test_check_manrs_excludes_action2(self, tools):
+        """Action 2 (Anti-Spoofing) should not be scored."""
+        result = await tools.check_manrs(15169)
+        # Should not have Action 2 as a scored section
+        assert "100/100" not in result or "Anti-Spoofing" not in result
+
+
+class TestRunComplianceAudit:
+    """Tests for run_compliance_audit tool in standalone mode."""
+
+    @pytest.fixture
+    def mock_ripe_stat(self):
+        mock = AsyncMock()
+        mock.get_announced_prefixes = AsyncMock(return_value=["8.8.8.0/24"])
+        mock.get_rpki_validation = AsyncMock(return_value="valid")
+        mock.get_bgp_state = AsyncMock(return_value=[])
+        mock.get_bgp_update_activity = AsyncMock(return_value={"updates": []})
+        return mock
+
+    @pytest.fixture
+    def tools(self, mock_ripe_stat):
+        monocle = AsyncMock()
+        monocle.get_as_upstreams = AsyncMock(return_value=[])
+        monocle.get_as_peers = AsyncMock(return_value=[])
+        monocle.get_as_downstreams = AsyncMock(return_value=[])
+        peeringdb = AsyncMock()
+        peeringdb.get_ixps_for_asn = MagicMock(return_value=[])
+        peeringdb.get_network_by_asn = MagicMock(return_value=None)
+        return BGPTools(
+            ripe_stat=mock_ripe_stat,
+            bgp_radar=AsyncMock(),
+            monocle=monocle,
+            peeringdb=peeringdb,
+        )
+
+    @pytest.mark.asyncio
+    async def test_manrs_framework(self, tools):
+        """run_compliance_audit with framework='manrs' should work."""
+        result = await tools.run_compliance_audit(15169, framework="manrs")
+        assert "MANRS" in result
+
+    @pytest.mark.asyncio
+    async def test_invalid_framework(self, tools):
+        """Invalid framework should return error."""
+        result = await tools.run_compliance_audit(15169, framework="bogus")
+        assert "invalid" in result.lower() or "Invalid" in result or "Error" in result

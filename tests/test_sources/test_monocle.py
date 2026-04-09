@@ -519,12 +519,11 @@ class TestMonocleClient:
     @pytest.mark.asyncio
     async def test_run_command_bare_empty_array_response(self, client):
         """Test that _run_command normalizes bare empty JSON array to dict."""
+
         async def mock_run(*args, **kwargs):
             mock_process = MagicMock()
             mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(
-                return_value=(json.dumps([]).encode(), b"")
-            )
+            mock_process.communicate = AsyncMock(return_value=(json.dumps([]).encode(), b""))
             return mock_process
 
         with patch("asyncio.create_subprocess_exec", mock_run):
@@ -537,12 +536,11 @@ class TestMonocleClient:
     @pytest.mark.asyncio
     async def test_check_relationship_bare_empty_array(self, client):
         """Test check_relationship handles monocle returning bare empty array."""
+
         async def mock_run(*args, **kwargs):
             mock_process = MagicMock()
             mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(
-                return_value=(json.dumps([]).encode(), b"")
-            )
+            mock_process.communicate = AsyncMock(return_value=(json.dumps([]).encode(), b""))
             return mock_process
 
         with patch("asyncio.create_subprocess_exec", mock_run):
