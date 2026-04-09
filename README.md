@@ -138,11 +138,30 @@ BGP_RADAR_PATH=/path/to/bgp-radar
 MANRS_API_KEY=your_manrs_api_key_here
 ```
 
-### Claude Desktop MCP Setup
+### MANRS API Key (Optional)
 
-When using bgp-explorer as an MCP server in Claude Desktop, API keys must be added
-to the Claude Desktop config (`.env` is not read by the MCP process):
+The MANRS API key enables `run_audit(framework='manrs')` to fetch **official conformance data** from the MANRS Observatory. Without it, the audit still works using local data (RPKI coverage, PeeringDB contacts) — you just won't get the official MANRS scores.
 
+**How to get your free API key:**
+
+1. Go to https://manrs.org/resources/api/
+2. Click "Register" and create an account (free)
+3. After login, your API key is displayed on the API page
+4. Copy the key (format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+
+**Where to configure it depends on how you use bgp-explorer:**
+
+**Standalone CLI** (`bgp-explorer chat`) — add to `.env`:
+```bash
+MANRS_API_KEY=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+**Claude Code MCP** (`claude mcp add`) — add to Claude Code's MCP env:
+```bash
+claude mcp add bgp-explorer -e MANRS_API_KEY=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx -- bgp-explorer mcp
+```
+
+**Claude Desktop MCP** — add to the config file:
 ```json
 // ~/Library/Application Support/Claude/claude_desktop_config.json
 {
@@ -151,14 +170,15 @@ to the Claude Desktop config (`.env` is not read by the MCP process):
       "command": "/path/to/bgp-explorer/.venv/bin/bgp-explorer",
       "args": ["mcp"],
       "env": {
-        "MANRS_API_KEY": "your-manrs-api-key-here"
+        "MANRS_API_KEY": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
       }
     }
   }
 }
 ```
+> Restart Claude Desktop after changing this file.
 
-> **Note:** Restart Claude Desktop after changing this file.
+**Without the key:** MANRS audits still run — they use RPKI validation, PeeringDB contacts, and rpki-client ASPA data to assess Actions 1, 3, 4. You just won't see the official Observatory conformance status.
 
 ## Usage
 
